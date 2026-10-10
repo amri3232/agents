@@ -4,6 +4,36 @@
 
 ## Verdikt: NICHT einsatzbereit. Kein echtes Geld einsetzen.
 
+> **Status-Update (Commit `af3d754`).** Ein Teil der Blocker ist behoben; der
+> Rest steht noch. Live-Handel ist jetzt Opt-in: `POLYMARKET_DRY_RUN` ist
+> standardmäßig `true`, ein Lauf bepreist und validiert die Order, gibt sie
+> aus und sendet nichts.
+>
+> | Punkt | Status |
+> |---|---|
+> | A1 Outcome-Index hardcodiert | behoben |
+> | A2 `side` verworfen / SELL unmöglich | behoben (SELL wird explizit abgelehnt) |
+> | A3 Größe per Regex aus Freitext | behoben (JSON + Validierung) |
+> | A4 Kein Slippage-Schutz | behoben (Cap, Mindestliquidität, Mindestgröße, Max-Order) |
+> | A5 Kein Check auf geschlossene Märkte | behoben (Markt-Ebene) |
+> | A6 Marktauswahl ohne Bewertung | **offen** |
+> | A7 Unbegrenzte Rekursion | behoben (3 Versuche, Backoff) |
+> | B1 `requirements.txt` nicht installierbar | behoben (verifiziert auf 3.11) |
+> | B2 Keine On-Chain-Approvals | **offen** (bewusster Einmal-Lauf nötig) |
+> | B3 Proxy-Wallet nicht unterstützt | **offen** (Saldo 0 nennt jetzt die Ursache) |
+> | B4 Trade auskommentiert | ersetzt durch Dry-Run-Schalter |
+> | C1 Prompt-f-String-Bug | behoben (beide Stellen) |
+> | C2 Keine Tests | 28 Tests für den Order-Pfad |
+> | C3 `cron.py` nicht lauffähig | **offen** |
+> | C4 `build_order` ignoriert Preis | **offen** (von diesem Pfad unbenutzt) |
+> | C5 Keine Paginierung | **offen** (`pdb`-Import entfernt) |
+> | C6 Keine Risikolimits | teilweise (Max-Order + Dry-Run; kein Tageslimit) |
+>
+> Die Abschnitte darunter beschreiben den Zustand **vor** diesem Commit und
+> bleiben als Begründung stehen. **A6 ist der entscheidende offene Punkt:**
+> die Order ist jetzt korrekt gebaut und begrenzt, aber eine validierte Order
+> ist keine gute Order.
+
 Der autonome Handelspfad (`agents/application/trade.py` → `executor.py` → `polymarket.py`)
 enthält mehrere Fehler, die unabhängig von der Qualität der KI-Prognose zu Geldverlust führen.
 Die Prognose wird teilweise schlicht verworfen, bevor die Order gebaut wird.
