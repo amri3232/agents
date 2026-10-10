@@ -49,7 +49,8 @@ class Prompter:
         Provide specific information for markets including probabilities of outcomes.
         Give your response in the following format:
 
-        I believe {market_question} has a likelihood {float} for outcome of {outcome}.
+        I believe {market_question} has a likelihood <probability as a decimal
+        between 0 and 1> for outcome of {outcome}.
         """
 
     def prompts_polymarket(self, data1: str, data2: str) -> str:
@@ -140,7 +141,9 @@ class Prompter:
 
         Give your response in the following format:
 
-        I believe {question} has a likelihood `{float}` for outcome of `{str}`.
+        I believe {question} has a likelihood `probability_as_decimal` for
+        outcome of `outcome_name`, where probability_as_decimal is a number
+        strictly between 0 and 1 and outcome_name is one of the market outcomes.
         """
 
     def one_best_trade(
@@ -152,38 +155,49 @@ class Prompter:
         return (
             self.polymarket_analyst_api()
             + f"""
-        
-                Imagine yourself as the top trader on Polymarket, dominating the world of information markets with your keen insights and strategic acumen. You have an extraordinary ability to analyze and interpret data from diverse sources, turning complex information into profitable trading opportunities.
-                You excel in predicting the outcomes of global events, from political elections to economic developments, using a combination of data analysis and intuition. Your deep understanding of probability and statistics allows you to assess market sentiment and make informed decisions quickly.
-                Every day, you approach Polymarket with a disciplined strategy, identifying undervalued opportunities and managing your portfolio with precision. You are adept at evaluating the credibility of information and filtering out noise, ensuring that your trades are based on reliable data.
-                Your adaptability is your greatest asset, enabling you to thrive in a rapidly changing environment. You leverage cutting-edge technology and tools to gain an edge over other traders, constantly seeking innovative ways to enhance your strategies.
-                In your journey on Polymarket, you are committed to continuous learning, staying informed about the latest trends and developments in various sectors. Your emotional intelligence empowers you to remain composed under pressure, making rational decisions even when the stakes are high.
-                Visualize yourself consistently achieving outstanding returns, earning recognition as the top trader on Polymarket. You inspire others with your success, setting new standards of excellence in the world of information markets.
+
+                You are a disciplined trader on Polymarket. You size positions
+                conservatively, you respect the spread, and you only take a
+                position when your own probability estimate differs materially
+                from the market price. You would rather pass on a trade than pay
+                up for a thin orderbook.
 
         """
             + f"""
-        
+
         You made the following prediction for a market: {prediction}
 
-        The current outcomes ${outcomes} prices are: ${outcome_prices}
+        The market outcomes are: {outcomes}
+        The current prices for those outcomes, in the same order, are: {outcome_prices}
 
-        Given your prediction, respond with a genius trade in the format:
-        `
-            price:'price_on_the_orderbook',
-            size:'percentage_of_total_funds',
-            side: BUY or SELL,
-        `
+        On Polymarket each outcome is a separate token priced between 0 and 1,
+        and the price is the market's implied probability of that outcome. To
+        express a view that an outcome is more likely than the market thinks,
+        you BUY that outcome's token. Choose exactly one outcome to trade.
 
-        Your trade should approximate price using the likelihood in your prediction.
+        Respond with ONLY a JSON object, no prose and no code fence, with these
+        keys:
 
-        Example response:
+          "outcome":       one of {outcomes}, spelled exactly as given
+          "side":          "BUY" or "SELL"
+          "probability":   your own probability for that outcome, strictly
+                           between 0 and 1
+          "limit_price":   the highest price you are willing to pay for that
+                           outcome's token, strictly between 0 and 1
+          "size_fraction": the fraction of total funds to deploy, greater than 0
+                           and at most 1. Keep this small unless your edge is
+                           large.
+          "reasoning":     one sentence on why this trade has an edge
 
-        RESPONSE```
-            price:0.5,
-            size:0.1,
-            side:BUY,
-        ```
-        
+        Your limit_price must leave an edge against your own probability: for a
+        BUY, limit_price must be below probability. If no outcome offers an
+        edge, still return the single best candidate and set size_fraction to
+        the smallest value you consider justified.
+
+        Example of the exact expected shape:
+
+        {{"outcome": "Yes", "side": "BUY", "probability": 0.72, "limit_price": 0.61, "size_fraction": 0.05, "reasoning": "Polling trend has moved well past the implied price."}}
+
         """
         )
 

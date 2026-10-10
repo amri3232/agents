@@ -2,10 +2,11 @@
 # https://github.com/Polymarket/py-clob-client/tree/main/examples
 
 import os
-import pdb
 import time
 import ast
 import requests
+
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
@@ -34,6 +35,8 @@ load_dotenv()
 
 
 class Polymarket:
+    MIN_ORDER_USDC = 1.0
+
     def __init__(self) -> None:
         self.gamma_url = "https://gamma-api.polymarket.com"
         self.gamma_markets_endpoint = self.gamma_url + "/markets"
@@ -200,11 +203,44 @@ class Polymarket:
         return markets
 
     def filter_markets_for_trading(self, markets: "list[SimpleMarket]"):
-        tradeable_markets = []
-        for market in markets:
-            if market.active:
-                tradeable_markets.append(market)
-        return tradeable_markets
+        return [m for m in markets if self.is_market_tradeable(m)]
+
+    @staticmethod
+    def is_market_tradeable(market) -> bool:
+        """True only if the market can still be traded.
+
+        Accepts either a SimpleMarket or the plain dict that map_api_to_market
+        returns, since the pipeline passes both.
+
+        `active` alone is not enough: Polymarket leaves it true after a market
+        stops trading, so an already-resolved market would pass. A market that
+        is closed, archived, or past its end date is not tradeable.
+        """
+
+        def field(name, default=None):
+            if isinstance(market, dict):
+                return market.get(name, default)
+            return getattr(market, name, default)
+
+        if not bool(field("active", False)):
+            return False
+        if bool(field("closed", False)) or bool(field("archived", False)):
+            return False
+
+        end = field("end")
+        if end:
+            try:
+                parsed = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                if parsed <= datetime.now(timezone.utc):
+                    return False
+            except ValueError:
+                # An unparseable end date is not evidence the market is open,
+                # but it is not evidence it is closed either; the flags above
+                # already carried the decision.
+                pass
+        return True
 
     def get_market(self, token_id: str) -> SimpleMarket:
         params = {"clob_token_ids": token_id}
@@ -230,6 +266,8 @@ class Polymarket:
             "outcomes": str(market["outcomes"]),
             "outcome_prices": str(market["outcomePrices"]),
             "clob_token_ids": str(market["clobTokenIds"]),
+            "closed": bool(market.get("closed", False)),
+            "archived": bool(market.get("archived", False)),
         }
         if token_id:
             market["clob_token_ids"] = token_id
@@ -338,17 +376,113 @@ class Polymarket:
             OrderArgs(price=price, size=size, side=side, token_id=token_id)
         )
 
-    def execute_market_order(self, market, amount) -> str:
-        token_id = ast.literal_eval(market[0].dict()["metadata"]["clob_token_ids"])[1]
+    def quote_buy(self, token_id: str, amount_usdc: float) -> dict:
+        """Walk the asks to price a buy of `amount_usdc`, without sending anything.
+
+        Returns the worst price needed to fill, the volume-weighted average
+        price, and the best ask. Raises if the book cannot fill the amount.
+
+        The book is sorted here rather than trusted in the order the API
+        returns it: `calculate_market_price` in py_clob_client walks `asks` as
+        given and returns the price of the level where cumulative notional
+        first covers the amount, which is only the worst *needed* level if the
+        asks happen to arrive best-first.
+        """
+        book = self.get_orderbook(token_id)
+        if book is None or not book.asks:
+            raise RuntimeError(f"no asks in orderbook for token {token_id}")
+
+        levels = sorted(
+            (
+                (float(a.price), float(a.size))
+                for a in book.asks
+                if float(a.price) > 0 and float(a.size) > 0
+            ),
+            key=lambda level: level[0],
+        )
+        if not levels:
+            raise RuntimeError(f"no priced asks in orderbook for token {token_id}")
+        best_ask = levels[0][0]
+
+        spent = 0.0
+        shares = 0.0
+        worst_price = best_ask
+        for price, size in levels:
+            if spent >= amount_usdc:
+                break
+            take_notional = min(price * size, amount_usdc - spent)
+            spent += take_notional
+            shares += take_notional / price
+            worst_price = price
+
+        if spent + 1e-9 < amount_usdc:
+            raise RuntimeError(
+                f"insufficient liquidity for token {token_id}: book can absorb "
+                f"{spent:.2f} USDC of the requested {amount_usdc:.2f} USDC"
+            )
+
+        return {
+            "best_ask": best_ask,
+            "worst_price": worst_price,
+            "vwap": spent / shares if shares else best_ask,
+            "shares": shares,
+        }
+
+    def execute_market_order(
+        self,
+        token_id: str,
+        amount_usdc: float,
+        max_price: float,
+        dry_run: bool = True,
+    ) -> str:
+        """Buy `amount_usdc` of `token_id`, never above `max_price`.
+
+        `token_id` is passed in rather than derived here: deriving it meant a
+        hardcoded outcome index, which bought the wrong side of the market.
+
+        An explicit `price` is always sent. Leaving it at 0 makes the client
+        pick the worst orderbook level needed to fill and use that single price
+        as the limit for the whole FOK order, which on a thin book means paying
+        the worst price for every share with no cap.
+        """
+        if amount_usdc < self.MIN_ORDER_USDC:
+            raise ValueError(
+                f"order of {amount_usdc:.2f} USDC is below the "
+                f"{self.MIN_ORDER_USDC:.2f} USDC minimum"
+            )
+        if not 0.0 < max_price < 1.0:
+            raise ValueError(f"max_price must be in (0, 1), got {max_price}")
+
+        quote = self.quote_buy(token_id, amount_usdc)
+        if quote["worst_price"] > max_price:
+            raise RuntimeError(
+                f"aborting: filling {amount_usdc:.2f} USDC would reach "
+                f"{quote['worst_price']:.4f}, above the {max_price:.4f} limit "
+                f"(best ask {quote['best_ask']:.4f}, vwap {quote['vwap']:.4f})"
+            )
+
+        # Round to the finest tick Polymarket uses (0.001), so float
+        # representation noise from parsing the book cannot fail the client's
+        # own tick-size validation. The value is already on the tick grid.
+        limit_price = round(quote["worst_price"], 4)
+        print(
+            f"ORDER token={token_id} amount={amount_usdc:.2f} USDC "
+            f"limit={limit_price:.4f} best_ask={quote['best_ask']:.4f} "
+            f"vwap={quote['vwap']:.4f} shares~{quote['shares']:.2f}"
+        )
+
+        if dry_run:
+            print("DRY RUN: order was priced and validated but not sent.")
+            return "dry-run"
+
         order_args = MarketOrderArgs(
             token_id=token_id,
-            amount=amount,
+            amount=amount_usdc,
+            price=limit_price,
         )
         signed_order = self.client.create_market_order(order_args)
-        print("Execute market order... signed_order ", signed_order)
         resp = self.client.post_order(signed_order, orderType=OrderType.FOK)
         print(resp)
-        print("Done!")
         return resp
 
     def get_usdc_balance(self) -> float:

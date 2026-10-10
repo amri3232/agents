@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Union
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class Trade(BaseModel):
@@ -42,6 +42,65 @@ class SimpleMarket(BaseModel):
     outcomes: str
     outcome_prices: str
     clob_token_ids: Optional[str]
+    # `active` stays true after a market stops trading, so it cannot be used on
+    # its own to decide tradeability. These are the fields that actually say a
+    # market is done; default False so an API response that omits them parses.
+    closed: bool = False
+    archived: bool = False
+
+
+class TradeDecision(BaseModel):
+    """A trade the model proposes, in a shape that can be validated.
+
+    Replaces regex-scraping a free-form completion: every field the order
+    needs is explicit, so a malformed or missing value fails loudly here
+    instead of silently producing the wrong order.
+    """
+
+    outcome: str
+    side: str
+    probability: float
+    limit_price: float
+    size_fraction: float
+    reasoning: str = ""
+
+    @field_validator("side")
+    @classmethod
+    def _side_known(cls, v: str) -> str:
+        normalized = v.strip().upper()
+        if normalized not in ("BUY", "SELL"):
+            raise ValueError(f"side must be BUY or SELL, got {v!r}")
+        return normalized
+
+    @field_validator("probability", "limit_price")
+    @classmethod
+    def _unit_interval(cls, v: float, info) -> float:
+        if not 0.0 < v < 1.0:
+            raise ValueError(
+                f"{info.field_name} must be strictly between 0 and 1, got {v}"
+            )
+        return v
+
+    @field_validator("size_fraction")
+    @classmethod
+    def _fraction_of_balance(cls, v: float) -> float:
+        if not 0.0 < v <= 1.0:
+            raise ValueError(
+                f"size_fraction must be in (0, 1] as a fraction of balance, got {v}"
+            )
+        return v
+
+
+class OrderPlan(BaseModel):
+    """A fully resolved, checked order, ready to send or to log in a dry run."""
+
+    token_id: str
+    outcome: str
+    side: str
+    amount_usdc: float
+    limit_price: float
+    expected_shares: float
+    market_question: str
 
 
 class ClobReward(BaseModel):
