@@ -151,52 +151,44 @@ class Prompter:
         prediction: str,
         outcomes: List[str],
         outcome_prices: str,
+        question: str = "",
     ) -> str:
         return (
             self.polymarket_analyst_api()
             + f"""
 
-                You are a disciplined trader on Polymarket. You size positions
-                conservatively, you respect the spread, and you only take a
-                position when your own probability estimate differs materially
-                from the market price. You would rather pass on a trade than pay
-                up for a thin orderbook.
+        The market question is: {question}
 
-        """
-            + f"""
-
-        You made the following prediction for a market: {prediction}
+        You made the following analysis of it: {prediction}
 
         The market outcomes are: {outcomes}
-        The current prices for those outcomes, in the same order, are: {outcome_prices}
+        The last traded prices for those outcomes, in the same order, are:
+        {outcome_prices}
 
         On Polymarket each outcome is a separate token priced between 0 and 1,
-        and the price is the market's implied probability of that outcome. To
-        express a view that an outcome is more likely than the market thinks,
-        you BUY that outcome's token. Choose exactly one outcome to trade.
+        and that price is the market's implied probability of the outcome.
 
-        Respond with ONLY a JSON object, no prose and no code fence, with these
-        keys:
+        Commit to a probability for exactly one outcome. Do not pick a position
+        size, a limit price or a side: those are computed from your probability
+        and the live orderbook, not chosen by you.
 
-          "outcome":       one of {outcomes}, spelled exactly as given
-          "side":          "BUY" or "SELL"
-          "probability":   your own probability for that outcome, strictly
-                           between 0 and 1
-          "limit_price":   the highest price you are willing to pay for that
-                           outcome's token, strictly between 0 and 1
-          "size_fraction": the fraction of total funds to deploy, greater than 0
-                           and at most 1. Keep this small unless your edge is
-                           large.
-          "reasoning":     one sentence on why this trade has an edge
+        Your probability should be your honest belief, not a number chosen to
+        justify a trade. The prices above already aggregate the views of
+        informed traders, so a large disagreement with them needs a specific
+        reason you can state. If you have no such reason, say so in your
+        reasoning and give a probability close to the market price.
 
-        Your limit_price must leave an edge against your own probability: for a
-        BUY, limit_price must be below probability. If no outcome offers an
-        edge, still return the single best candidate and set size_fraction to
-        the smallest value you consider justified.
+        Respond with ONLY a JSON object, no prose and no code fence:
+
+          "outcome":     one of {outcomes}, spelled exactly as given
+          "probability": your probability for that outcome, strictly between
+                         0 and 1
+          "reasoning":   one sentence on what specifically you know or have
+                         reasoned that the market price does not reflect
 
         Example of the exact expected shape:
 
-        {{"outcome": "Yes", "side": "BUY", "probability": 0.72, "limit_price": 0.61, "size_fraction": 0.05, "reasoning": "Polling trend has moved well past the implied price."}}
+        {{"outcome": "Yes", "probability": 0.72, "reasoning": "The polling trend over the last three weeks has moved well past what the implied price reflects."}}
 
         """
         )

@@ -16,23 +16,33 @@
 > | A3 Größe per Regex aus Freitext | behoben (JSON + Validierung) |
 > | A4 Kein Slippage-Schutz | behoben (Cap, Mindestliquidität, Mindestgröße, Max-Order) |
 > | A5 Kein Check auf geschlossene Märkte | behoben (Markt-Ebene) |
-> | A6 Marktauswahl ohne Bewertung | **offen** |
+> | A6 Marktauswahl ohne Bewertung | Edge/Kelly statt Ähnlichkeit — aber **Kalibrierung unbewiesen** |
 > | A7 Unbegrenzte Rekursion | behoben (3 Versuche, Backoff) |
 > | B1 `requirements.txt` nicht installierbar | behoben (verifiziert auf 3.11) |
-> | B2 Keine On-Chain-Approvals | **offen** (bewusster Einmal-Lauf nötig) |
-> | B3 Proxy-Wallet nicht unterstützt | **offen** (Saldo 0 nennt jetzt die Ursache) |
+> | B2 Keine On-Chain-Approvals | behoben (`cli.py set-approvals`, Einmal-Lauf) |
+> | B3 Proxy-Wallet nicht unterstützt | behoben (`POLYMARKET_SIGNATURE_TYPE`/`_FUNDER`) |
 > | B4 Trade auskommentiert | ersetzt durch Dry-Run-Schalter |
 > | C1 Prompt-f-String-Bug | behoben (beide Stellen) |
-> | C2 Keine Tests | 28 Tests für den Order-Pfad |
-> | C3 `cron.py` nicht lauffähig | **offen** |
+> | C2 Keine Tests | 45 Tests (Order-Pfad, Edge/Kelly, Journal) |
+> | C3 `cron.py` nicht lauffähig | behoben |
 > | C4 `build_order` ignoriert Preis | **offen** (von diesem Pfad unbenutzt) |
 > | C5 Keine Paginierung | **offen** (`pdb`-Import entfernt) |
-> | C6 Keine Risikolimits | teilweise (Max-Order + Dry-Run; kein Tageslimit) |
+> | C6 Keine Risikolimits | behoben (Max-Order, Tageslimit, Bankroll-Cap, Journal) |
 >
-> Die Abschnitte darunter beschreiben den Zustand **vor** diesem Commit und
-> bleiben als Begründung stehen. **A6 ist der entscheidende offene Punkt:**
-> die Order ist jetzt korrekt gebaut und begrenzt, aber eine validierte Order
-> ist keine gute Order.
+> Die Abschnitte darunter beschreiben den Zustand **vor** den Fixes und
+> bleiben als Begründung stehen.
+>
+> **Der entscheidende Punkt ist jetzt die Kalibrierung, nicht mehr der Code.**
+> Die Order wird korrekt gebaut, begrenzt und nur bei positivem Erwartungswert
+> ausgelöst. Aber dieser Erwartungswert wird gegen die *eigene*
+> Wahrscheinlichkeit des Modells gerechnet. Ein überkonfidenter Forecaster
+> erzeugt große scheinbare Edge und verliert trotzdem Geld. Nichts in diesem
+> Repo belegt, dass der Forecaster kalibriert ist.
+>
+> Deshalb schreibt der Agent jedes Urteil nach `trade_journal.jsonl`. Nach ein
+> paar Dutzend aufgelösten Märkten zeigt `cli.py journal-report`, ob die
+> Prognosen trafen — inklusive realisiertem P&L. Erst diese Zahl entscheidet,
+> ob echtes Geld sinnvoll ist. Bis dahin: `POLYMARKET_DRY_RUN=true`.
 
 Der autonome Handelspfad (`agents/application/trade.py` → `executor.py` → `polymarket.py`)
 enthält mehrere Fehler, die unabhängig von der Qualität der KI-Prognose zu Geldverlust führen.

@@ -73,12 +73,48 @@ class Polymarket:
         self._init_approvals(False)
 
     def _init_api_keys(self) -> None:
-        self.client = ClobClient(
-            self.clob_url, key=self.private_key, chain_id=self.chain_id
-        )
+        """Build the CLOB client, honouring a proxy wallet if one is configured.
+
+        Without signature_type/funder the client trades from the EOA that owns
+        the private key. Funds deposited through polymarket.com do not sit
+        there: they sit in a proxy (Safe) wallet, so an unconfigured client
+        sees a zero balance and cannot spend the deposit.
+
+        signature_type 1 is an email/magic proxy wallet, 2 a browser-wallet
+        proxy; funder is the proxy address holding the USDC. Both are shown on
+        the Polymarket deposit screen.
+        """
+        signature_type = os.getenv("POLYMARKET_SIGNATURE_TYPE")
+        funder = os.getenv("POLYMARKET_FUNDER") or None
+
+        kwargs = {"key": self.private_key, "chain_id": self.chain_id}
+        if signature_type not in (None, ""):
+            kwargs["signature_type"] = int(signature_type)
+            kwargs["funder"] = funder
+            if not funder:
+                raise ValueError(
+                    "POLYMARKET_SIGNATURE_TYPE is set but POLYMARKET_FUNDER is "
+                    "empty; the proxy wallet address is required"
+                )
+
+        self.client = ClobClient(self.clob_url, **kwargs)
         self.credentials = self.client.create_or_derive_api_creds()
         self.client.set_api_creds(self.credentials)
-        # print(self.credentials)
+        self.funder = funder
+
+    def set_approvals(self) -> None:
+        """Set the USDC allowances and CTF approval the exchanges need.
+
+        This sends real transactions and costs MATIC for gas. It is a one-off
+        per wallet and is NOT called on construction: it used to be invoked as
+        `_init_approvals(False)`, which returned immediately, so a fresh wallet
+        silently had no approvals and its orders could not settle.
+
+        Run it deliberately once: `python scripts/python/cli.py set-approvals`.
+        """
+        if not self.private_key:
+            raise ValueError("POLYGON_WALLET_PRIVATE_KEY is not set")
+        return self._init_approvals(run=True)
 
     def _init_approvals(self, run: bool = False) -> None:
         if not run:
@@ -486,10 +522,17 @@ class Polymarket:
         return resp
 
     def get_usdc_balance(self) -> float:
+        """USDC balance of the account that actually funds orders.
+
+        That is the proxy wallet when one is configured, not the EOA; reading
+        the EOA in that case reports 0 and sizes every order to nothing.
+        """
+        address = getattr(self, "funder", None) or self.get_address_for_private_key()
         balance_res = self.usdc.functions.balanceOf(
-            self.get_address_for_private_key()
+            Web3.to_checksum_address(address)
         ).call()
-        return float(balance_res / 10e5)
+        # USDC has 6 decimals.
+        return float(balance_res) / 1_000_000
 
 
 def test():

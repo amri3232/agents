@@ -126,3 +126,28 @@ def run_autonomous_trader() -> None:
 
 if __name__ == "__main__":
     app()
+
+
+@app.command()
+def set_approvals() -> None:
+    """
+    Set the on-chain approvals the exchanges need (one-off, costs MATIC gas).
+
+    A fresh wallet has no USDC allowance and no CTF approval, so its orders
+    cannot settle. Run this once before enabling live trading.
+    """
+    polymarket.set_approvals()
+
+
+@app.command()
+def journal_report(path: str = "trade_journal.jsonl") -> None:
+    """
+    Summarise the decision journal: calibration and committed notional.
+
+    Run the agent in dry-run mode across a few dozen markets first, wait for
+    them to resolve, then use this to see whether the forecasts were actually
+    calibrated before putting money behind them.
+    """
+    from agents.application.report import summarise
+
+    print(summarise(path))

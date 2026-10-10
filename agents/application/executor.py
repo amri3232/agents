@@ -6,6 +6,10 @@ from typing import List, Dict, Any
 
 import math
 
+# Headroom allowed above the best ask when setting the limit, so a tick of
+# movement between quote and fill does not kill an otherwise good order.
+MAX_SLIPPAGE = 0.02
+
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -15,9 +19,11 @@ from agents.connectors.chroma import PolymarketRAG as Chroma
 from agents.utils.objects import (
     SimpleEvent,
     SimpleMarket,
-    TradeDecision,
+    MarketForecast,
+    Candidate,
     OrderPlan,
 )
+from agents.application.strategy import evaluate_candidate
 from agents.application.prompts import Prompter
 from agents.polymarket.polymarket import Polymarket
 
@@ -196,8 +202,8 @@ class Executor:
         return self.chroma.markets(markets, prompt)
 
     @staticmethod
-    def parse_trade_decision(content: str, outcomes: "list[str]") -> TradeDecision:
-        """Turn the model's reply into a validated TradeDecision.
+    def parse_forecast(content: str, outcomes: "list[str]") -> MarketForecast:
+        """Turn the model's reply into a validated MarketForecast.
 
         The previous approach split the reply on commas and regex-matched a
         float out of the second field. A one-line preamble shifted that match
@@ -213,9 +219,9 @@ class Executor:
             text = fenced.group(1).strip()
         else:
             # Otherwise take the outermost JSON object in the reply.
-            start, end = text.find("{"), text.rfind("}")
-            if start != -1 and end > start:
-                text = text[start : end + 1]
+            brace_start, brace_end = text.find("{"), text.rfind("}")
+            if brace_start != -1 and brace_end > brace_start:
+                text = text[brace_start : brace_end + 1]
 
         try:
             raw = json.loads(text)
@@ -226,61 +232,43 @@ class Executor:
         if not isinstance(raw, dict):
             raise ValueError(f"expected a JSON object, got {type(raw).__name__}")
 
-        decision = TradeDecision(**raw)
-
-        if decision.outcome not in outcomes:
+        forecast = MarketForecast(**raw)
+        if forecast.outcome not in outcomes:
             raise ValueError(
-                f"model chose outcome {decision.outcome!r}, which is not one of "
+                f"model chose outcome {forecast.outcome!r}, which is not one of "
                 f"the market outcomes {outcomes}"
             )
-        if decision.side == "SELL":
-            # A market SELL cannot be built with this client (MarketOrderArgs
-            # has no side and prices against the asks), and closing a position
-            # is a different operation from opening one. Fail loudly rather
-            # than silently sending the BUY the old code would have sent.
-            raise ValueError(
-                "model asked to SELL; selling is not implemented. To express a "
-                "bearish view, BUY the opposing outcome instead."
-            )
-        if decision.limit_price >= decision.probability:
-            raise ValueError(
-                f"no edge: limit_price {decision.limit_price} is not below the "
-                f"model's own probability {decision.probability}"
-            )
-        return decision
+        return forecast
 
-    def source_best_trade(self, market_object) -> TradeDecision:
+    def forecast_market(self, market_object) -> MarketForecast:
+        """Ask the model for a probability on one market."""
         market_document = market_object[0].dict()
         market = market_document["metadata"]
-        outcome_prices = ast.literal_eval(market["outcome_prices"])
         outcomes = ast.literal_eval(market["outcomes"])
         question = market["question"]
         description = market_document["page_content"]
 
         prompt = self.prompter.superforecaster(question, description, outcomes)
-        result = self.llm.invoke(prompt)
-        content = result.content
-        print("forecast: ", content)
+        reasoning = self.llm.invoke(prompt).content
 
-        prompt = self.prompter.one_best_trade(content, outcomes, outcome_prices)
-        result = self.llm.invoke(prompt)
-        print("trade: ", result.content)
+        prompt = self.prompter.one_best_trade(
+            reasoning, outcomes, market["outcome_prices"], question
+        )
+        return self.parse_forecast(self.llm.invoke(prompt).content, outcomes)
 
-        return self.parse_trade_decision(result.content, outcomes)
-
-    def build_order_plan(
+    def score_market(
         self,
         market_object,
-        decision: TradeDecision,
-        max_order_usdc: float,
-        usdc_balance: float = None,
-    ) -> OrderPlan:
-        """Resolve a decision into a concrete order against the right token.
+        available_notional: float,
+        min_edge: float,
+        kelly_multiplier: float,
+        max_fraction: float,
+    ) -> "Candidate | None":
+        """Forecast one market and score it against the live orderbook.
 
-        The outcome the model chose selects the token by its index in the
-        market's own outcome list. The old code indexed `clob_token_ids` at a
-        hardcoded [1], so it always bought the second outcome regardless of
-        what the forecast said.
+        The ask comes from the orderbook rather than from the market metadata:
+        the cached `outcome_prices` can be stale, and it is not what an order
+        would actually pay.
         """
         market = market_object[0].dict()["metadata"]
         outcomes = ast.literal_eval(market["outcomes"])
@@ -291,27 +279,47 @@ class Executor:
                 f"{len(token_ids)} token ids; cannot resolve the token safely"
             )
 
-        token_id = token_ids[outcomes.index(decision.outcome)]
+        forecast = self.forecast_market(market_object)
+        token_id = str(token_ids[outcomes.index(forecast.outcome)])
 
-        if usdc_balance is None:
-            usdc_balance = self.polymarket.get_usdc_balance()
-        if usdc_balance <= 0:
-            raise RuntimeError(
-                "USDC balance is 0 for the key's own address. If funds were "
-                "deposited through polymarket.com they sit in a proxy wallet, "
-                "which needs signature_type/funder on the client."
-            )
+        quote = self.polymarket.quote_buy(token_id, self.polymarket.MIN_ORDER_USDC)
 
-        amount_usdc = min(decision.size_fraction * usdc_balance, max_order_usdc)
-
-        return OrderPlan(
-            token_id=str(token_id),
-            outcome=decision.outcome,
-            side=decision.side,
-            amount_usdc=round(amount_usdc, 2),
-            limit_price=decision.limit_price,
-            expected_shares=round(amount_usdc / decision.limit_price, 2),
+        return evaluate_candidate(
+            forecast=forecast,
+            token_id=token_id,
+            ask_price=quote["best_ask"],
+            available_notional=available_notional,
             market_question=market["question"],
+            min_edge=min_edge,
+            kelly_multiplier=kelly_multiplier,
+            max_fraction=max_fraction,
+        )
+
+    def build_order_plan(self, candidate, max_order_usdc: float) -> OrderPlan:
+        """Turn a scored candidate into a concrete order.
+
+        The outcome's token was resolved from the market's own outcome list in
+        score_market. The old code indexed `clob_token_ids` at a hardcoded [1],
+        so it always bought the second outcome regardless of the forecast.
+        """
+        amount_usdc = min(
+            candidate.size_fraction * candidate.available_notional, max_order_usdc
+        )
+        return OrderPlan(
+            token_id=candidate.token_id,
+            outcome=candidate.outcome,
+            side="BUY",
+            amount_usdc=round(amount_usdc, 2),
+            # Pay up to the forecast probability at most: above it the trade is
+            # negative-EV on the agent's own numbers.
+            limit_price=round(
+                min(candidate.ask_price * (1 + MAX_SLIPPAGE), candidate.probability), 4
+            ),
+            expected_shares=round(amount_usdc / candidate.ask_price, 2),
+            market_question=candidate.market_question,
+            probability=candidate.probability,
+            edge=candidate.edge,
+            expected_value=candidate.expected_value,
         )
 
     def source_best_market_to_create(self, filtered_markets) -> str:

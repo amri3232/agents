@@ -49,46 +49,41 @@ class SimpleMarket(BaseModel):
     archived: bool = False
 
 
-class TradeDecision(BaseModel):
-    """A trade the model proposes, in a shape that can be validated.
+class MarketForecast(BaseModel):
+    """What the model is asked for: a probability, not a position size.
 
-    Replaces regex-scraping a free-form completion: every field the order
-    needs is explicit, so a malformed or missing value fails loudly here
-    instead of silently producing the wrong order.
+    The previous design had the model emit `size_fraction`, `limit_price` and
+    `side` as free text that was regex-scraped. Position size is not a
+    forecasting judgement; it follows from the edge and the bankroll, so it is
+    computed in strategy.py instead.
     """
 
     outcome: str
-    side: str
     probability: float
-    limit_price: float
-    size_fraction: float
     reasoning: str = ""
 
-    @field_validator("side")
+    @field_validator("probability")
     @classmethod
-    def _side_known(cls, v: str) -> str:
-        normalized = v.strip().upper()
-        if normalized not in ("BUY", "SELL"):
-            raise ValueError(f"side must be BUY or SELL, got {v!r}")
-        return normalized
-
-    @field_validator("probability", "limit_price")
-    @classmethod
-    def _unit_interval(cls, v: float, info) -> float:
+    def _unit_interval(cls, v: float) -> float:
         if not 0.0 < v < 1.0:
-            raise ValueError(
-                f"{info.field_name} must be strictly between 0 and 1, got {v}"
-            )
+            raise ValueError(f"probability must be in (0, 1), got {v}")
         return v
 
-    @field_validator("size_fraction")
-    @classmethod
-    def _fraction_of_balance(cls, v: float) -> float:
-        if not 0.0 < v <= 1.0:
-            raise ValueError(
-                f"size_fraction must be in (0, 1] as a fraction of balance, got {v}"
-            )
-        return v
+
+class Candidate(BaseModel):
+    """A scored outcome: the forecast, the live ask, and the resulting size."""
+
+    token_id: str
+    outcome: str
+    market_question: str
+    probability: float
+    ask_price: float
+    edge: float
+    expected_value: float
+    full_kelly: float
+    size_fraction: float
+    available_notional: float
+    reasoning: str = ""
 
 
 class OrderPlan(BaseModel):
@@ -101,6 +96,9 @@ class OrderPlan(BaseModel):
     limit_price: float
     expected_shares: float
     market_question: str
+    probability: float = 0.0
+    edge: float = 0.0
+    expected_value: float = 0.0
 
 
 class ClobReward(BaseModel):
