@@ -23,7 +23,7 @@ from agents.utils.objects import (
     Candidate,
     OrderPlan,
 )
-from agents.application.strategy import evaluate_candidate
+from agents.application.strategy import evaluate_both_sides
 from agents.application.prompts import Prompter
 from agents.polymarket.polymarket import Polymarket
 
@@ -202,59 +202,67 @@ class Executor:
         return self.chroma.markets(markets, prompt)
 
     @staticmethod
-    def parse_forecast(content: str, outcomes: "list[str]") -> MarketForecast:
-        """Turn the model's reply into a validated MarketForecast.
+    def parse_probability(content: str) -> float:
+        """Read the single decimal the model was told to return, and nothing else.
 
-        The previous approach split the reply on commas and regex-matched a
-        float out of the second field. A one-line preamble shifted that match
-        from `size` onto `price` (turning a 20% stake into 62%), an integer
-        size raised IndexError, and `side` was dropped entirely. Parsing JSON
-        and validating it means a malformed reply fails here instead of
-        producing a plausible-looking wrong order.
+        The output rule asks for a bare number, but models append labels,
+        percent signs and stray sentences anyway, so this is tolerant about
+        surrounding text while refusing anything ambiguous. It deliberately
+        does not fall back to "take some number from the reply": a reply
+        containing several numbers is a reply that did not follow the rule,
+        and guessing which one is the forecast is how the old regex produced
+        confidently wrong orders.
         """
         text = content.strip()
-        # Tolerate a ```json fence, since models add one even when told not to.
-        fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-        if fenced:
-            text = fenced.group(1).strip()
+
+        # A bare number, optionally wrapped in fences, quotes or a label.
+        direct = re.fullmatch(
+            r"[`'\"]*\s*(?:probability\s*[:=]\s*)?(\d*\.?\d+)\s*%?[`'\"]*",
+            text,
+            re.IGNORECASE,
+        )
+        if direct:
+            value = float(direct.group(1))
         else:
-            # Otherwise take the outermost JSON object in the reply.
-            brace_start, brace_end = text.find("{"), text.rfind("}")
-            if brace_start != -1 and brace_end > brace_start:
-                text = text[brace_start : brace_end + 1]
+            numbers = re.findall(r"\d*\.\d+|\b[01]\b", text)
+            if len(numbers) != 1:
+                raise ValueError(
+                    f"expected exactly one probability in the reply, found "
+                    f"{len(numbers)}; got: {content!r}"
+                )
+            value = float(numbers[0])
 
-        try:
-            raw = json.loads(text)
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"model reply was not valid JSON ({e}); got: {content!r}"
-            ) from e
-        if not isinstance(raw, dict):
-            raise ValueError(f"expected a JSON object, got {type(raw).__name__}")
+        # A model that answered in percent despite the instruction.
+        if value > 1.0:
+            if value <= 100.0:
+                value = value / 100.0
+            else:
+                raise ValueError(f"probability out of range: {value}")
 
-        forecast = MarketForecast(**raw)
-        if forecast.outcome not in outcomes:
+        if not 0.0 < value < 1.0:
             raise ValueError(
-                f"model chose outcome {forecast.outcome!r}, which is not one of "
-                f"the market outcomes {outcomes}"
+                f"probability must be strictly between 0 and 1, got {value}; "
+                f"a calibrated forecast leaves residual uncertainty"
             )
-        return forecast
+        return value
 
     def forecast_market(self, market_object) -> MarketForecast:
-        """Ask the model for a probability on one market."""
+        """Analyse one market in writing, then extract a single probability."""
         market_document = market_object[0].dict()
         market = market_document["metadata"]
         outcomes = ast.literal_eval(market["outcomes"])
         question = market["question"]
         description = market_document["page_content"]
 
-        prompt = self.prompter.superforecaster(question, description, outcomes)
-        reasoning = self.llm.invoke(prompt).content
-
-        prompt = self.prompter.one_best_trade(
-            reasoning, outcomes, market["outcome_prices"], question
+        prompt = self.prompter.superforecaster(
+            question, description, outcomes, market["outcome_prices"]
         )
-        return self.parse_forecast(self.llm.invoke(prompt).content, outcomes)
+        analysis = self.llm.invoke(prompt).content
+
+        prompt = self.prompter.probability_only(question, analysis, outcomes)
+        probability = self.parse_probability(self.llm.invoke(prompt).content)
+
+        return MarketForecast(probability_yes=probability, reasoning=analysis[:500])
 
     def score_market(
         self,
@@ -263,10 +271,10 @@ class Executor:
         min_edge: float,
         kelly_multiplier: float,
         max_fraction: float,
-    ) -> "Candidate | None":
-        """Forecast one market and score it against the live orderbook.
+    ) -> "list[Candidate]":
+        """Forecast one market and score both of its sides.
 
-        The ask comes from the orderbook rather than from the market metadata:
+        The asks come from the orderbook rather than from the market metadata:
         the cached `outcome_prices` can be stale, and it is not what an order
         would actually pay.
         """
@@ -278,16 +286,26 @@ class Executor:
                 f"market has {len(outcomes)} outcomes but "
                 f"{len(token_ids)} token ids; cannot resolve the token safely"
             )
+        if len(outcomes) != 2:
+            raise ValueError(
+                f"market has {len(outcomes)} outcomes; this strategy prices "
+                f"two-outcome markets only"
+            )
 
         forecast = self.forecast_market(market_object)
-        token_id = str(token_ids[outcomes.index(forecast.outcome)])
 
-        quote = self.polymarket.quote_buy(token_id, self.polymarket.MIN_ORDER_USDC)
+        asks = [
+            self.polymarket.quote_buy(str(t), self.polymarket.MIN_ORDER_USDC)[
+                "best_ask"
+            ]
+            for t in token_ids
+        ]
 
-        return evaluate_candidate(
+        return evaluate_both_sides(
             forecast=forecast,
-            token_id=token_id,
-            ask_price=quote["best_ask"],
+            outcomes=outcomes,
+            token_ids=token_ids,
+            asks=asks,
             available_notional=available_notional,
             market_question=market["question"],
             min_edge=min_edge,

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 from agents.application.executor import Executor
 from agents.application.journal import Journal
 from agents.application.strategy import (
+    evaluate_both_sides,
     evaluate_candidate,
     expected_value_per_dollar,
     kelly_fraction,
@@ -58,43 +59,123 @@ def candidate(**kw):
     return Candidate(**base)
 
 
-class TestParseForecast(unittest.TestCase):
-    outcomes = ["Yes", "No"]
+class TestParseProbability(unittest.TestCase):
+    """The output rule asks for one bare decimal; models disobey in known ways."""
 
     def parse(self, content):
-        return Executor.parse_forecast(content, self.outcomes)
+        return Executor.parse_probability(content)
 
-    def test_plain_json(self):
-        f = self.parse('{"outcome":"Yes","probability":0.72}')
-        self.assertEqual(f.outcome, "Yes")
-        self.assertAlmostEqual(f.probability, 0.72)
+    def test_bare_decimal(self):
+        self.assertAlmostEqual(self.parse("0.63"), 0.63)
 
-    def test_json_in_code_fence(self):
-        f = self.parse('```json\n{"outcome":"No","probability":0.8}\n```')
-        self.assertEqual(f.outcome, "No")
+    def test_surrounding_whitespace(self):
+        self.assertAlmostEqual(self.parse("  0.42\n"), 0.42)
 
-    def test_json_with_prose_preamble(self):
-        """The old regex shifted onto `price` here and tripled the stake."""
-        f = self.parse(
-            'After analysis: {"outcome":"Yes","probability":0.9,"reasoning":"x"}'
+    def test_leading_dot(self):
+        self.assertAlmostEqual(self.parse(".75"), 0.75)
+
+    def test_code_fence(self):
+        self.assertAlmostEqual(self.parse("`0.55`"), 0.55)
+
+    def test_labelled_despite_the_rule(self):
+        self.assertAlmostEqual(self.parse("probability: 0.31"), 0.31)
+
+    def test_percent_is_converted(self):
+        self.assertAlmostEqual(self.parse("63%"), 0.63)
+
+    def test_percent_without_sign_is_converted(self):
+        self.assertAlmostEqual(self.parse("63"), 0.63)
+
+    def test_single_number_inside_a_stray_sentence(self):
+        self.assertAlmostEqual(
+            self.parse("My estimate is 0.58 based on the base rate."), 0.58
         )
-        self.assertAlmostEqual(f.probability, 0.9)
 
-    def test_rejects_unknown_outcome(self):
-        with self.assertRaisesRegex(ValueError, "not one of the market outcomes"):
-            self.parse('{"outcome":"Maybe","probability":0.7}')
+    def test_several_numbers_is_refused_not_guessed(self):
+        """The old regex guessed here, and guessed wrong."""
+        with self.assertRaisesRegex(ValueError, "exactly one probability"):
+            self.parse("Between 0.30 and 0.45, I would say 0.38.")
 
-    def test_rejects_probability_outside_unit_interval(self):
+    def test_zero_is_refused(self):
+        """Calibration: reality leaves residual uncertainty."""
+        with self.assertRaisesRegex(ValueError, "strictly between"):
+            self.parse("0.0")
+
+    def test_one_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "strictly between"):
+            self.parse("1.0")
+
+    def test_out_of_range_is_refused(self):
         with self.assertRaises(ValueError):
-            self.parse('{"outcome":"Yes","probability":1.4}')
+            self.parse("420")
 
-    def test_rejects_non_json(self):
-        with self.assertRaisesRegex(ValueError, "not valid JSON"):
-            self.parse("price:0.5,size:0.1,side:BUY,")
-
-    def test_rejects_missing_probability(self):
+    def test_no_number_is_refused(self):
         with self.assertRaises(ValueError):
-            self.parse('{"outcome":"Yes"}')
+            self.parse("I cannot say.")
+
+
+class TestForecastComplement(unittest.TestCase):
+    def test_second_outcome_is_the_complement(self):
+        f = MarketForecast(probability_yes=0.7)
+        self.assertAlmostEqual(f.probability_for(0), 0.7)
+        self.assertAlmostEqual(f.probability_for(1), 0.3)
+
+    def test_third_outcome_is_refused(self):
+        with self.assertRaises(ValueError):
+            MarketForecast(probability_yes=0.7).probability_for(2)
+
+    def test_extremes_are_refused(self):
+        for bad in (0.0, 1.0, -0.2, 1.5):
+            with self.assertRaises(ValueError):
+                MarketForecast(probability_yes=bad)
+
+
+class TestEvaluateBothSides(unittest.TestCase):
+    def sides(self, probability_yes, asks, min_edge=0.10):
+        return evaluate_both_sides(
+            forecast=MarketForecast(probability_yes=probability_yes),
+            outcomes=["Yes", "No"],
+            token_ids=["tok_yes", "tok_no"],
+            asks=asks,
+            available_notional=100.0,
+            market_question="Q?",
+            min_edge=min_edge,
+            kelly_multiplier=0.25,
+            max_fraction=0.05,
+        )
+
+    def test_finds_edge_on_the_yes_side(self):
+        got = self.sides(0.80, [0.50, 0.50])
+        self.assertEqual([c.outcome for c in got], ["Yes"])
+
+    def test_finds_edge_on_the_no_side(self):
+        """P(yes)=0.20 means P(no)=0.80; the cheap No is the mispriced side."""
+        got = self.sides(0.20, [0.50, 0.50])
+        self.assertEqual([c.outcome for c in got], ["No"])
+        self.assertAlmostEqual(got[0].probability, 0.80)
+        self.assertEqual(got[0].token_id, "tok_no")
+
+    def test_no_edge_on_either_side(self):
+        self.assertEqual(self.sides(0.50, [0.52, 0.52]), [])
+
+    def test_both_sides_can_qualify_when_the_book_is_wide(self):
+        # A wide spread can leave both sides cheap relative to the forecast.
+        got = self.sides(0.50, [0.30, 0.30])
+        self.assertEqual(sorted(c.outcome for c in got), ["No", "Yes"])
+
+    def test_non_binary_market_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "two-outcome markets only"):
+            evaluate_both_sides(
+                forecast=MarketForecast(probability_yes=0.6),
+                outcomes=["A", "B", "C"],
+                token_ids=["a", "b", "c"],
+                asks=[0.3, 0.3, 0.3],
+                available_notional=100.0,
+                market_question="Q?",
+                min_edge=0.1,
+                kelly_multiplier=0.25,
+                max_fraction=0.05,
+            )
 
 
 class TestStrategyMath(unittest.TestCase):
@@ -145,7 +226,8 @@ class TestStrategyMath(unittest.TestCase):
 class TestEvaluateCandidate(unittest.TestCase):
     def evaluate(self, probability, ask_price, min_edge=0.10, max_fraction=0.05):
         return evaluate_candidate(
-            forecast=MarketForecast(outcome="Yes", probability=probability),
+            probability=probability,
+            outcome="Yes",
             token_id="tok_yes",
             ask_price=ask_price,
             available_notional=100.0,

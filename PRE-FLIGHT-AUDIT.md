@@ -23,7 +23,7 @@
 > | B3 Proxy-Wallet nicht unterstützt | behoben (`POLYMARKET_SIGNATURE_TYPE`/`_FUNDER`) |
 > | B4 Trade auskommentiert | ersetzt durch Dry-Run-Schalter |
 > | C1 Prompt-f-String-Bug | behoben (beide Stellen) |
-> | C2 Keine Tests | 45 Tests (Order-Pfad, Edge/Kelly, Journal) |
+> | C2 Keine Tests | 62 Tests (Order-Pfad, Edge/Kelly, Journal, Forecaster) |
 > | C3 `cron.py` nicht lauffähig | behoben |
 > | C4 `build_order` ignoriert Preis | **offen** (von diesem Pfad unbenutzt) |
 > | C5 Keine Paginierung | **offen** (`pdb`-Import entfernt) |

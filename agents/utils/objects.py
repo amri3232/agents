@@ -50,24 +50,33 @@ class SimpleMarket(BaseModel):
 
 
 class MarketForecast(BaseModel):
-    """What the model is asked for: a probability, not a position size.
+    """One probability, for the market's first outcome.
 
-    The previous design had the model emit `size_fraction`, `limit_price` and
-    `side` as free text that was regex-scraped. Position size is not a
-    forecasting judgement; it follows from the edge and the bankroll, so it is
-    computed in strategy.py instead.
+    The model is asked for a single number rather than for an outcome plus a
+    size. Which side to buy is not a forecasting judgement: given P(first
+    outcome), the complement gives P(second outcome), and the strategy layer
+    checks both against their own asks. That catches the case where the
+    cheaper side is the mispriced one, and removes a degree of freedom the
+    model was previously free to get wrong.
     """
 
-    outcome: str
-    probability: float
+    probability_yes: float
     reasoning: str = ""
 
-    @field_validator("probability")
+    @field_validator("probability_yes")
     @classmethod
     def _unit_interval(cls, v: float) -> float:
         if not 0.0 < v < 1.0:
-            raise ValueError(f"probability must be in (0, 1), got {v}")
+            raise ValueError(f"probability_yes must be in (0, 1), got {v}")
         return v
+
+    def probability_for(self, index: int) -> float:
+        """P(outcome at `index`) for a two-outcome market."""
+        if index == 0:
+            return self.probability_yes
+        if index == 1:
+            return 1.0 - self.probability_yes
+        raise ValueError(f"only two-outcome markets are supported, got {index}")
 
 
 class Candidate(BaseModel):

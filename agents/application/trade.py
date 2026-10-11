@@ -129,7 +129,8 @@ class Trader:
         for market in shortlist:
             question = market[0].dict()["metadata"].get("question", "?")
             try:
-                candidate = self.agent.score_market(
+                # Both sides of the market are scored against one forecast.
+                scored = self.agent.score_market(
                     market,
                     available_notional=bankroll,
                     min_edge=self.min_edge,
@@ -141,16 +142,17 @@ class Trader:
                 print(f"   skipped {question!r}: {e}")
                 self.journal.record_skip(question, str(e))
                 continue
-            if candidate is None:
-                print(f"   no edge: {question!r}")
+            if not scored:
+                print(f"   no edge on either side: {question!r}")
                 self.journal.record_skip(question, "below min_edge or out of band")
                 continue
-            print(
-                f"   candidate {candidate.outcome!r} @ {candidate.ask_price:.3f} "
-                f"p={candidate.probability:.3f} edge={candidate.edge:+.3f} "
-                f"ev={candidate.expected_value:+.3f}"
-            )
-            candidates.append(candidate)
+            for candidate in scored:
+                print(
+                    f"   candidate {candidate.outcome!r} @ "
+                    f"{candidate.ask_price:.3f} p={candidate.probability:.3f} "
+                    f"edge={candidate.edge:+.3f} ev={candidate.expected_value:+.3f}"
+                )
+            candidates.extend(scored)
 
         print(f"7. {len(candidates)} CANDIDATES WITH EDGE")
         best = select_best(candidates)

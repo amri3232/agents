@@ -52,7 +52,8 @@ def kelly_fraction(probability: float, price: float) -> float:
 
 
 def evaluate_candidate(
-    forecast: MarketForecast,
+    probability: float,
+    outcome: str,
     token_id: str,
     ask_price: float,
     available_notional: float,
@@ -60,8 +61,9 @@ def evaluate_candidate(
     min_edge: float,
     kelly_multiplier: float,
     max_fraction: float,
+    reasoning: str = "",
 ) -> Optional[Candidate]:
-    """Score one outcome, or return None if it fails a gate.
+    """Score one side of a market, or return None if it fails a gate.
 
     `ask_price` must come from the live orderbook, not from the market
     metadata: the cached outcome price can be stale and is not what an order
@@ -70,31 +72,74 @@ def evaluate_candidate(
     if not MIN_TRADEABLE_PRICE <= ask_price <= MAX_TRADEABLE_PRICE:
         return None
 
-    edge = forecast.probability - ask_price
+    edge = probability - ask_price
     # Compare with a small tolerance: an edge meant to sit exactly on the
     # threshold (0.60 - 0.50) is 0.09999999999999998 in binary and would
     # otherwise be rejected.
     if edge < min_edge - 1e-9:
         return None
 
-    full_kelly = kelly_fraction(forecast.probability, ask_price)
+    full_kelly = kelly_fraction(probability, ask_price)
     fraction = min(full_kelly * kelly_multiplier, max_fraction)
     if fraction <= 0:
         return None
 
     return Candidate(
         token_id=token_id,
-        outcome=forecast.outcome,
+        outcome=outcome,
         market_question=market_question,
-        probability=forecast.probability,
+        probability=probability,
         ask_price=ask_price,
         edge=edge,
-        expected_value=expected_value_per_dollar(forecast.probability, ask_price),
+        expected_value=expected_value_per_dollar(probability, ask_price),
         full_kelly=full_kelly,
         size_fraction=fraction,
         available_notional=available_notional,
-        reasoning=forecast.reasoning,
+        reasoning=reasoning,
     )
+
+
+def evaluate_both_sides(
+    forecast: MarketForecast,
+    outcomes: List[str],
+    token_ids: List[str],
+    asks: List[float],
+    available_notional: float,
+    market_question: str,
+    min_edge: float,
+    kelly_multiplier: float,
+    max_fraction: float,
+) -> List[Candidate]:
+    """Score every side of a two-outcome market against one forecast.
+
+    A single P(first outcome) prices both sides: the complement is P(second
+    outcome). Both are checked against their own ask, because the mispriced
+    side is often the cheap one and the market's two prices do not have to sum
+    to 1 once the spread is included.
+    """
+    if not (len(outcomes) == len(token_ids) == len(asks) == 2):
+        raise ValueError(
+            f"this strategy handles two-outcome markets only; got "
+            f"{len(outcomes)} outcomes, {len(token_ids)} tokens, {len(asks)} asks"
+        )
+
+    scored = []
+    for index, (outcome, token_id, ask) in enumerate(zip(outcomes, token_ids, asks)):
+        candidate = evaluate_candidate(
+            probability=forecast.probability_for(index),
+            outcome=outcome,
+            token_id=str(token_id),
+            ask_price=ask,
+            available_notional=available_notional,
+            market_question=market_question,
+            min_edge=min_edge,
+            kelly_multiplier=kelly_multiplier,
+            max_fraction=max_fraction,
+            reasoning=forecast.reasoning,
+        )
+        if candidate is not None:
+            scored.append(candidate)
+    return scored
 
 
 def select_best(candidates: List[Candidate]) -> Optional[Candidate]:

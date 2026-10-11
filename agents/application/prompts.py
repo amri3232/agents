@@ -110,40 +110,90 @@ class Prompter:
         """
         )
 
-    def superforecaster(self, question: str, description: str, outcome: str) -> str:
+    def superforecaster(
+        self,
+        question: str,
+        description: str,
+        outcomes: List[str],
+        outcome_prices: str = "",
+    ) -> str:
+        """Work the analysis out in writing, before committing to a number.
+
+        The market price is included deliberately: step 3 asks the model to
+        argue why the price might be right and it wrong, which it cannot do
+        without seeing the price. The written analysis is the reasoning the
+        probability is then extracted from.
+        """
         return f"""
-        You are a Superforecaster tasked with correctly predicting the likelihood of events.
-        Use the following systematic process to develop an accurate prediction for the following
-        question=`{question}` and description=`{description}` combination. 
-        
-        Here are the key steps to use in your analysis:
+        You are a highly specialised analyst for prediction markets. Your goal
+        is not to be right; it is to find the true mathematical probability of
+        an event.
 
-        1. Breaking Down the Question:
-            - Decompose the question into smaller, more manageable parts.
-            - Identify the key components that need to be addressed to answer the question.
-        2. Gathering Information:
-            - Seek out diverse sources of information.
-            - Look for both quantitative data and qualitative insights.
-            - Stay updated on relevant news and expert analyses.
-        3. Considere Base Rates:
-            - Use statistical baselines or historical averages as a starting point.
-            - Compare the current situation to similar past events to establish a benchmark probability.
-        4. Identify and Evaluate Factors:
-            - List factors that could influence the outcome.
-            - Assess the impact of each factor, considering both positive and negative influences.
-            - Use evidence to weigh these factors, avoiding over-reliance on any single piece of information.
-        5. Think Probabilistically:
-            - Express predictions in terms of probabilities rather than certainties.
-            - Assign likelihoods to different outcomes and avoid binary thinking.
-            - Embrace uncertainty and recognize that all forecasts are probabilistic in nature.
-        
-        Given these steps produce a statement on the probability of outcome=`{outcome}` occuring.
+        Question: `{question}`
+        Description: `{description}`
+        Market outcomes: {outcomes}
+        Current market prices for those outcomes, in the same order:
+        {outcome_prices}
 
-        Give your response in the following format:
+        On a prediction market the price of an outcome IS the market's implied
+        probability of it. A price of 0.65 means the market collectively
+        believes there is a 65% chance.
 
-        I believe {question} has a likelihood `probability_as_decimal` for
-        outcome of `outcome_name`, where probability_as_decimal is a number
-        strictly between 0 and 1 and outcome_name is one of the market outcomes.
+        Work through all four steps in writing. Be specific; cite the concrete
+        facts and base rates you are reasoning from.
+
+        1. Evidence FOR yes:
+            - The strongest arguments and data pointing to a positive outcome.
+
+        2. Evidence FOR no:
+            - Actively look for reasons the event does NOT happen.
+            - Be your own harshest critic. Do not treat this section as a
+              formality: if you cannot argue the other side convincingly, you
+              do not understand the question well enough to trade it.
+
+        3. Market check:
+            - Why might the current market price be right and you wrong?
+            - The other traders may hold information you do not, may be closer
+              to the event, or may understand the resolution criteria better.
+            - Name your blind spot explicitly. What would you need to know to
+              be confident the market is mispriced, and do you actually know
+              it?
+
+        4. Calibration:
+            - Be careful with extreme numbers. Reality almost always leaves
+              residual uncertainty, so avoid 0.0 and 1.0.
+            - If after steps 1 to 3 you have no specific reason the market is
+              wrong, your probability should land close to the market price.
+              Disagreeing with the market is a claim that needs evidence, not
+              a default.
+
+        End with one sentence stating your probability for `{outcomes[0]}`.
+        """
+
+    def probability_only(
+        self,
+        question: str,
+        analysis: str,
+        outcomes: List[str],
+    ) -> str:
+        """Extract the single number, with no room for anything else.
+
+        Kept as a separate call so the analysis above is written out in full
+        first: the reasoning is what makes the number worth anything, and a
+        model asked for a bare number up front skips it.
+        """
+        return f"""
+        Question: `{question}`
+
+        Your analysis:
+        {analysis}
+
+        Output rule: give ONLY a single decimal number between 0.0 and 1.0,
+        representing your estimated probability that `{outcomes[0]}` occurs.
+        No explanation, no text, no percent sign, no label. Just the number.
+
+        Example of a valid response:
+        0.63
         """
 
     def one_best_trade(
