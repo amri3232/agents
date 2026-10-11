@@ -49,7 +49,8 @@ class Prompter:
         Provide specific information for markets including probabilities of outcomes.
         Give your response in the following format:
 
-        I believe {market_question} has a likelihood {float} for outcome of {outcome}.
+        I believe {market_question} has a likelihood <probability as a decimal
+        between 0 and 1> for outcome of {outcome}.
         """
 
     def prompts_polymarket(self, data1: str, data2: str) -> str:
@@ -109,38 +110,121 @@ class Prompter:
         """
         )
 
-    def superforecaster(self, question: str, description: str, outcome: str) -> str:
+    def superforecaster(
+        self,
+        question: str,
+        description: str,
+        outcomes: List[str],
+        outcome_prices: str = "",
+        research: str = "",
+        has_research: bool = False,
+    ) -> str:
+        """Work the analysis out in writing, before committing to a number.
+
+        The market price is included deliberately: the market-calibration step
+        asks the model to argue why the price might be right and it wrong,
+        which it cannot do without seeing the price.
+
+        `has_research` is passed separately from `research` so the blind case
+        is explicit rather than inferred from an empty string: a forecaster
+        with no current information must be told to stay near the market
+        price, not left to improvise confidence.
+        """
+        if has_research:
+            evidence_block = f"""
+        Current information gathered for this market:
+
+        {research}
+
+        Treat this as raw input, not as truth. Check dates: a headline from
+        before a decisive event is not current. Note what it does NOT tell
+        you.
+        """
+        else:
+            evidence_block = """
+        NO current information was available for this market. You are
+        forecasting from the description above and your own prior knowledge
+        only, which may be out of date.
+
+        This is a severe limitation and it must show in your answer. Traders
+        setting the current price can read today's news and you cannot. Unless
+        the description alone settles the question, you have no basis for
+        disagreeing with the price, so your probability should stay close to
+        it.
+        """
+
         return f"""
-        You are a Superforecaster tasked with correctly predicting the likelihood of events.
-        Use the following systematic process to develop an accurate prediction for the following
-        question=`{question}` and description=`{description}` combination. 
-        
-        Here are the key steps to use in your analysis:
+        You are a highly specialised analyst for prediction markets. Your goal
+        is to find the mathematically most precise probability for the outcome
+        of an event - not to be right, and not to find a trade.
 
-        1. Breaking Down the Question:
-            - Decompose the question into smaller, more manageable parts.
-            - Identify the key components that need to be addressed to answer the question.
-        2. Gathering Information:
-            - Seek out diverse sources of information.
-            - Look for both quantitative data and qualitative insights.
-            - Stay updated on relevant news and expert analyses.
-        3. Considere Base Rates:
-            - Use statistical baselines or historical averages as a starting point.
-            - Compare the current situation to similar past events to establish a benchmark probability.
-        4. Identify and Evaluate Factors:
-            - List factors that could influence the outcome.
-            - Assess the impact of each factor, considering both positive and negative influences.
-            - Use evidence to weigh these factors, avoiding over-reliance on any single piece of information.
-        5. Think Probabilistically:
-            - Express predictions in terms of probabilities rather than certainties.
-            - Assign likelihoods to different outcomes and avoid binary thinking.
-            - Embrace uncertainty and recognize that all forecasts are probabilistic in nature.
-        
-        Given these steps produce a statement on the probability of outcome=`{outcome}` occuring.
+        Question: `{question}`
+        Description: `{description}`
+        Market outcomes: {outcomes}
+        Current market prices for those outcomes, in the same order:
+        {outcome_prices}
 
-        Give your response in the following format:
+        On a prediction market the price of an outcome IS the market's implied
+        probability of it. A price of 0.65 means the market collectively
+        believes there is a 65% chance.
+        {evidence_block}
+        Work through all four rules in writing. Be specific: cite the concrete
+        facts, dates and base rates you are reasoning from.
 
-        I believe {question} has a likelihood `{float}` for outcome of `{str}`.
+        1. Data-based evidence FOR yes:
+            - Hard facts and current data supporting a positive outcome.
+            - Name the source and date of each. "It seems likely" is not
+              evidence.
+
+        2. The advocatus diaboli principle:
+            - Actively search for every reason the event does NOT happen.
+            - Question your own assumptions from step 1. Which of them is
+              weakest, and what happens to your estimate if it is wrong?
+            - If you cannot argue the "no" case convincingly, you do not
+              understand the question well enough to put a number on it.
+
+        3. Market calibration:
+            - If the current price differs markedly from your view, ask: what
+              information does the market have that I have overlooked?
+            - Resolution criteria are a common answer. Re-read the description
+              and check that you are pricing the question that will actually
+              be settled, not the one you assume.
+            - Name your blind spot explicitly, then decide whether you still
+              disagree.
+
+        4. No extremes:
+            - Be extremely careful with 0% and 100%. In the real world there
+              is almost always residual uncertainty, so never use 0.0 or 1.0.
+            - Disagreeing with the market is a claim that requires evidence.
+              Absent such evidence, land close to the market price.
+
+        End with one sentence stating your probability for `{outcomes[0]}`.
+        """
+
+    def probability_only(
+        self,
+        question: str,
+        analysis: str,
+        outcomes: List[str],
+    ) -> str:
+        """Extract the single number, with no room for anything else.
+
+        Kept as a separate call so the analysis above is written out in full
+        first: the reasoning is what makes the number worth anything, and a
+        model asked for a bare number up front skips it.
+        """
+        return f"""
+        Question: `{question}`
+
+        Your analysis:
+        {analysis}
+
+        Output rule: give ONLY a single decimal number between 0.0 and 1.0,
+        representing your estimated probability that `{outcomes[0]}` occurs.
+        No explanation, no text, no percent sign, no label. Just the number.
+
+        Example of a valid response:
+        0.63
         """
 
     def one_best_trade(
@@ -148,42 +232,45 @@ class Prompter:
         prediction: str,
         outcomes: List[str],
         outcome_prices: str,
+        question: str = "",
     ) -> str:
         return (
             self.polymarket_analyst_api()
             + f"""
-        
-                Imagine yourself as the top trader on Polymarket, dominating the world of information markets with your keen insights and strategic acumen. You have an extraordinary ability to analyze and interpret data from diverse sources, turning complex information into profitable trading opportunities.
-                You excel in predicting the outcomes of global events, from political elections to economic developments, using a combination of data analysis and intuition. Your deep understanding of probability and statistics allows you to assess market sentiment and make informed decisions quickly.
-                Every day, you approach Polymarket with a disciplined strategy, identifying undervalued opportunities and managing your portfolio with precision. You are adept at evaluating the credibility of information and filtering out noise, ensuring that your trades are based on reliable data.
-                Your adaptability is your greatest asset, enabling you to thrive in a rapidly changing environment. You leverage cutting-edge technology and tools to gain an edge over other traders, constantly seeking innovative ways to enhance your strategies.
-                In your journey on Polymarket, you are committed to continuous learning, staying informed about the latest trends and developments in various sectors. Your emotional intelligence empowers you to remain composed under pressure, making rational decisions even when the stakes are high.
-                Visualize yourself consistently achieving outstanding returns, earning recognition as the top trader on Polymarket. You inspire others with your success, setting new standards of excellence in the world of information markets.
 
-        """
-            + f"""
-        
-        You made the following prediction for a market: {prediction}
+        The market question is: {question}
 
-        The current outcomes ${outcomes} prices are: ${outcome_prices}
+        You made the following analysis of it: {prediction}
 
-        Given your prediction, respond with a genius trade in the format:
-        `
-            price:'price_on_the_orderbook',
-            size:'percentage_of_total_funds',
-            side: BUY or SELL,
-        `
+        The market outcomes are: {outcomes}
+        The last traded prices for those outcomes, in the same order, are:
+        {outcome_prices}
 
-        Your trade should approximate price using the likelihood in your prediction.
+        On Polymarket each outcome is a separate token priced between 0 and 1,
+        and that price is the market's implied probability of the outcome.
 
-        Example response:
+        Commit to a probability for exactly one outcome. Do not pick a position
+        size, a limit price or a side: those are computed from your probability
+        and the live orderbook, not chosen by you.
 
-        RESPONSE```
-            price:0.5,
-            size:0.1,
-            side:BUY,
-        ```
-        
+        Your probability should be your honest belief, not a number chosen to
+        justify a trade. The prices above already aggregate the views of
+        informed traders, so a large disagreement with them needs a specific
+        reason you can state. If you have no such reason, say so in your
+        reasoning and give a probability close to the market price.
+
+        Respond with ONLY a JSON object, no prose and no code fence:
+
+          "outcome":     one of {outcomes}, spelled exactly as given
+          "probability": your probability for that outcome, strictly between
+                         0 and 1
+          "reasoning":   one sentence on what specifically you know or have
+                         reasoned that the market price does not reflect
+
+        Example of the exact expected shape:
+
+        {{"outcome": "Yes", "probability": 0.72, "reasoning": "The polling trend over the last three weeks has moved well past what the implied price reflects."}}
+
         """
         )
 

@@ -99,19 +99,74 @@ This repo is inteded for use with Python 3.9
 
 6. Load your wallet with USDC.
 
-7. Try the command line interface...
+   If you deposited through polymarket.com, your USDC is in a proxy wallet
+   rather than the address that owns your private key. Set
+   `POLYMARKET_SIGNATURE_TYPE` and `POLYMARKET_FUNDER` in that case, or the
+   agent reads a balance of zero. See `.env.example`.
+
+7. Set the on-chain approvals once (sends transactions, costs MATIC for gas):
+
+   ```
+   python scripts/python/cli.py set-approvals
+   ```
+
+8. Try the command line interface...
 
    ```
    python scripts/python/cli.py
    ```
 
-   Or just go trade! 
+   Or run the agent:
 
    ```
    python agents/application/trade.py
    ```
 
-8. Note: If running the command outside of docker, please set the following env var:
+### Check your setup first
+
+```
+python scripts/python/cli.py check-setup
+```
+
+This is the only thing that can tell you whether the agent works on your
+machine, because it is the only thing that touches the real dependencies. It
+verifies that the Gamma API still returns the fields this code reads (the pins
+are from mid-2024, so field drift is the most likely breakage), that the CLOB
+and orderbook answer, that your wallet resolves to a balance, and that your
+research keys work. Fix every `FAIL` before going further.
+
+### Before you trade with real money
+
+**`POLYMARKET_DRY_RUN` defaults to `true`.** In that mode a run forecasts
+markets, scores them, prices the order, writes it to the journal, and sends
+nothing. Read [PRE-FLIGHT-AUDIT.md](PRE-FLIGHT-AUDIT.md) before changing it.
+
+The agent picks trades by comparing its own probability against the live ask
+and sizing with fractional Kelly. That edge is only as good as the
+probability behind it: a confidently miscalibrated forecaster produces large
+apparent edge and loses money. Nothing in this repo establishes that the
+forecaster is calibrated, and prediction-market prices already aggregate
+informed traders, so assume no edge until you have measured one.
+
+The way to measure it costs nothing but time:
+
+1. Run in dry-run mode across a few dozen markets.
+2. Wait for those markets to resolve.
+3. Add a boolean `resolved` field to the journal rows whose markets settled
+   (did the chosen outcome happen?).
+4. Check calibration and realized P&L:
+
+   ```
+   python scripts/python/cli.py journal-report
+   ```
+
+If the `gap` column is negative, the forecaster is overconfident and trading
+it loses money regardless of the edge it claims. Risk limits
+(`POLYMARKET_MAX_ORDER_USDC`, `POLYMARKET_MAX_DAILY_USDC`,
+`POLYMARKET_MAX_BANKROLL_FRACTION`) bound the damage; they do not create an
+edge.
+
+9. Note: If running the command outside of docker, please set the following env var:
 
    ```
    export PYTHONPATH="."

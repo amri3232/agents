@@ -25,7 +25,30 @@ class News:
             "technology",
         }
 
-        self.API = NewsApiClient(os.getenv("NEWSAPI_API_KEY"))
+        self.api_key = os.getenv("NEWSAPI_API_KEY")
+        self.API = NewsApiClient(self.api_key)
+
+    @property
+    def available(self) -> bool:
+        return bool(self.api_key)
+
+    def get_articles_for_question(
+        self, question: str, max_articles: int = 6
+    ) -> "list[dict]":
+        """Recent articles relevant to a market question.
+
+        Uses /v2/everything with the question as the query. The `country`
+        parameter is not passed: that endpoint does not accept it, and the
+        two-letter ISO code it would need is not what a market question
+        implies anyway.
+        """
+        response = self.API.get_everything(
+            q=question,
+            language=self.configs["language"],
+            sort_by="publishedAt",
+            page_size=max_articles,
+        )
+        return response.get("articles", [])
 
     def get_articles_for_cli_keywords(self, keywords) -> "list[Article]":
         query_words = keywords.split(",")
@@ -37,8 +60,10 @@ class News:
         return article_objects
 
     def get_top_articles_for_market(self, market_object: dict) -> "list[Article]":
+        # country takes a two-letter ISO code; this passed "usa", which
+        # NewsAPI rejects.
         return self.API.get_top_headlines(
-            language="en", country="usa", q=market_object["description"]
+            language="en", country="us", q=market_object["description"]
         )
 
     def get_articles_for_options(
@@ -64,7 +89,6 @@ class News:
                 response_dict = self.API.get_everything(
                     q=option.strip(),
                     language=self.configs["language"],
-                    country=self.configs["country"],
                     from_param=date_start,
                     to=date_end,
                 )

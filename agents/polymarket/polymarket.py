@@ -2,10 +2,11 @@
 # https://github.com/Polymarket/py-clob-client/tree/main/examples
 
 import os
-import pdb
 import time
 import ast
 import requests
+
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
@@ -34,6 +35,8 @@ load_dotenv()
 
 
 class Polymarket:
+    MIN_ORDER_USDC = 1.0
+
     def __init__(self) -> None:
         self.gamma_url = "https://gamma-api.polymarket.com"
         self.gamma_markets_endpoint = self.gamma_url + "/markets"
@@ -70,12 +73,48 @@ class Polymarket:
         self._init_approvals(False)
 
     def _init_api_keys(self) -> None:
-        self.client = ClobClient(
-            self.clob_url, key=self.private_key, chain_id=self.chain_id
-        )
+        """Build the CLOB client, honouring a proxy wallet if one is configured.
+
+        Without signature_type/funder the client trades from the EOA that owns
+        the private key. Funds deposited through polymarket.com do not sit
+        there: they sit in a proxy (Safe) wallet, so an unconfigured client
+        sees a zero balance and cannot spend the deposit.
+
+        signature_type 1 is an email/magic proxy wallet, 2 a browser-wallet
+        proxy; funder is the proxy address holding the USDC. Both are shown on
+        the Polymarket deposit screen.
+        """
+        signature_type = os.getenv("POLYMARKET_SIGNATURE_TYPE")
+        funder = os.getenv("POLYMARKET_FUNDER") or None
+
+        kwargs = {"key": self.private_key, "chain_id": self.chain_id}
+        if signature_type not in (None, ""):
+            kwargs["signature_type"] = int(signature_type)
+            kwargs["funder"] = funder
+            if not funder:
+                raise ValueError(
+                    "POLYMARKET_SIGNATURE_TYPE is set but POLYMARKET_FUNDER is "
+                    "empty; the proxy wallet address is required"
+                )
+
+        self.client = ClobClient(self.clob_url, **kwargs)
         self.credentials = self.client.create_or_derive_api_creds()
         self.client.set_api_creds(self.credentials)
-        # print(self.credentials)
+        self.funder = funder
+
+    def set_approvals(self) -> None:
+        """Set the USDC allowances and CTF approval the exchanges need.
+
+        This sends real transactions and costs MATIC for gas. It is a one-off
+        per wallet and is NOT called on construction: it used to be invoked as
+        `_init_approvals(False)`, which returned immediately, so a fresh wallet
+        silently had no approvals and its orders could not settle.
+
+        Run it deliberately once: `python scripts/python/cli.py set-approvals`.
+        """
+        if not self.private_key:
+            raise ValueError("POLYGON_WALLET_PRIVATE_KEY is not set")
+        return self._init_approvals(run=True)
 
     def _init_approvals(self, run: bool = False) -> None:
         if not run:
@@ -200,11 +239,44 @@ class Polymarket:
         return markets
 
     def filter_markets_for_trading(self, markets: "list[SimpleMarket]"):
-        tradeable_markets = []
-        for market in markets:
-            if market.active:
-                tradeable_markets.append(market)
-        return tradeable_markets
+        return [m for m in markets if self.is_market_tradeable(m)]
+
+    @staticmethod
+    def is_market_tradeable(market) -> bool:
+        """True only if the market can still be traded.
+
+        Accepts either a SimpleMarket or the plain dict that map_api_to_market
+        returns, since the pipeline passes both.
+
+        `active` alone is not enough: Polymarket leaves it true after a market
+        stops trading, so an already-resolved market would pass. A market that
+        is closed, archived, or past its end date is not tradeable.
+        """
+
+        def field(name, default=None):
+            if isinstance(market, dict):
+                return market.get(name, default)
+            return getattr(market, name, default)
+
+        if not bool(field("active", False)):
+            return False
+        if bool(field("closed", False)) or bool(field("archived", False)):
+            return False
+
+        end = field("end")
+        if end:
+            try:
+                parsed = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                if parsed <= datetime.now(timezone.utc):
+                    return False
+            except ValueError:
+                # An unparseable end date is not evidence the market is open,
+                # but it is not evidence it is closed either; the flags above
+                # already carried the decision.
+                pass
+        return True
 
     def get_market(self, token_id: str) -> SimpleMarket:
         params = {"clob_token_ids": token_id}
@@ -214,7 +286,14 @@ class Polymarket:
             market = data[0]
             return self.map_api_to_market(market, token_id)
 
-    def map_api_to_market(self, market, token_id: str = "") -> SimpleMarket:
+    @staticmethod
+    def map_api_to_market(market, token_id: str = "") -> SimpleMarket:
+        """Map a Gamma API market payload onto SimpleMarket's fields.
+
+        Static because it reads nothing from the instance, which lets the
+        preflight check parse live markets without constructing a client (and
+        therefore without needing a private key).
+        """
         market = {
             "id": int(market["id"]),
             "question": market["question"],
@@ -230,6 +309,8 @@ class Polymarket:
             "outcomes": str(market["outcomes"]),
             "outcome_prices": str(market["outcomePrices"]),
             "clob_token_ids": str(market["clobTokenIds"]),
+            "closed": bool(market.get("closed", False)),
+            "archived": bool(market.get("archived", False)),
         }
         if token_id:
             market["clob_token_ids"] = token_id
@@ -338,24 +419,127 @@ class Polymarket:
             OrderArgs(price=price, size=size, side=side, token_id=token_id)
         )
 
-    def execute_market_order(self, market, amount) -> str:
-        token_id = ast.literal_eval(market[0].dict()["metadata"]["clob_token_ids"])[1]
+    def quote_buy(self, token_id: str, amount_usdc: float) -> dict:
+        """Walk the asks to price a buy of `amount_usdc`, without sending anything.
+
+        Returns the worst price needed to fill, the volume-weighted average
+        price, and the best ask. Raises if the book cannot fill the amount.
+
+        The book is sorted here rather than trusted in the order the API
+        returns it: `calculate_market_price` in py_clob_client walks `asks` as
+        given and returns the price of the level where cumulative notional
+        first covers the amount, which is only the worst *needed* level if the
+        asks happen to arrive best-first.
+        """
+        book = self.get_orderbook(token_id)
+        if book is None or not book.asks:
+            raise RuntimeError(f"no asks in orderbook for token {token_id}")
+
+        levels = sorted(
+            (
+                (float(a.price), float(a.size))
+                for a in book.asks
+                if float(a.price) > 0 and float(a.size) > 0
+            ),
+            key=lambda level: level[0],
+        )
+        if not levels:
+            raise RuntimeError(f"no priced asks in orderbook for token {token_id}")
+        best_ask = levels[0][0]
+
+        spent = 0.0
+        shares = 0.0
+        worst_price = best_ask
+        for price, size in levels:
+            if spent >= amount_usdc:
+                break
+            take_notional = min(price * size, amount_usdc - spent)
+            spent += take_notional
+            shares += take_notional / price
+            worst_price = price
+
+        if spent + 1e-9 < amount_usdc:
+            raise RuntimeError(
+                f"insufficient liquidity for token {token_id}: book can absorb "
+                f"{spent:.2f} USDC of the requested {amount_usdc:.2f} USDC"
+            )
+
+        return {
+            "best_ask": best_ask,
+            "worst_price": worst_price,
+            "vwap": spent / shares if shares else best_ask,
+            "shares": shares,
+        }
+
+    def execute_market_order(
+        self,
+        token_id: str,
+        amount_usdc: float,
+        max_price: float,
+        dry_run: bool = True,
+    ) -> str:
+        """Buy `amount_usdc` of `token_id`, never above `max_price`.
+
+        `token_id` is passed in rather than derived here: deriving it meant a
+        hardcoded outcome index, which bought the wrong side of the market.
+
+        An explicit `price` is always sent. Leaving it at 0 makes the client
+        pick the worst orderbook level needed to fill and use that single price
+        as the limit for the whole FOK order, which on a thin book means paying
+        the worst price for every share with no cap.
+        """
+        if amount_usdc < self.MIN_ORDER_USDC:
+            raise ValueError(
+                f"order of {amount_usdc:.2f} USDC is below the "
+                f"{self.MIN_ORDER_USDC:.2f} USDC minimum"
+            )
+        if not 0.0 < max_price < 1.0:
+            raise ValueError(f"max_price must be in (0, 1), got {max_price}")
+
+        quote = self.quote_buy(token_id, amount_usdc)
+        if quote["worst_price"] > max_price:
+            raise RuntimeError(
+                f"aborting: filling {amount_usdc:.2f} USDC would reach "
+                f"{quote['worst_price']:.4f}, above the {max_price:.4f} limit "
+                f"(best ask {quote['best_ask']:.4f}, vwap {quote['vwap']:.4f})"
+            )
+
+        # Round to the finest tick Polymarket uses (0.001), so float
+        # representation noise from parsing the book cannot fail the client's
+        # own tick-size validation. The value is already on the tick grid.
+        limit_price = round(quote["worst_price"], 4)
+        print(
+            f"ORDER token={token_id} amount={amount_usdc:.2f} USDC "
+            f"limit={limit_price:.4f} best_ask={quote['best_ask']:.4f} "
+            f"vwap={quote['vwap']:.4f} shares~{quote['shares']:.2f}"
+        )
+
+        if dry_run:
+            print("DRY RUN: order was priced and validated but not sent.")
+            return "dry-run"
+
         order_args = MarketOrderArgs(
             token_id=token_id,
-            amount=amount,
+            amount=amount_usdc,
+            price=limit_price,
         )
         signed_order = self.client.create_market_order(order_args)
-        print("Execute market order... signed_order ", signed_order)
         resp = self.client.post_order(signed_order, orderType=OrderType.FOK)
         print(resp)
-        print("Done!")
         return resp
 
     def get_usdc_balance(self) -> float:
+        """USDC balance of the account that actually funds orders.
+
+        That is the proxy wallet when one is configured, not the EOA; reading
+        the EOA in that case reports 0 and sizes every order to nothing.
+        """
+        address = getattr(self, "funder", None) or self.get_address_for_private_key()
         balance_res = self.usdc.functions.balanceOf(
-            self.get_address_for_private_key()
+            Web3.to_checksum_address(address)
         ).call()
-        return float(balance_res / 10e5)
+        # USDC has 6 decimals.
+        return float(balance_res) / 1_000_000
 
 
 def test():

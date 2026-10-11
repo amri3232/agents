@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, Union
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class Trade(BaseModel):
@@ -42,6 +42,76 @@ class SimpleMarket(BaseModel):
     outcomes: str
     outcome_prices: str
     clob_token_ids: Optional[str]
+    # `active` stays true after a market stops trading, so it cannot be used on
+    # its own to decide tradeability. These are the fields that actually say a
+    # market is done; default False so an API response that omits them parses.
+    closed: bool = False
+    archived: bool = False
+
+
+class MarketForecast(BaseModel):
+    """One probability, for the market's first outcome.
+
+    The model is asked for a single number rather than for an outcome plus a
+    size. Which side to buy is not a forecasting judgement: given P(first
+    outcome), the complement gives P(second outcome), and the strategy layer
+    checks both against their own asks. That catches the case where the
+    cheaper side is the mispriced one, and removes a degree of freedom the
+    model was previously free to get wrong.
+    """
+
+    probability_yes: float
+    reasoning: str = ""
+    # Which research sources answered. Empty means the forecast was made
+    # blind, which calibration analysis must be able to separate out.
+    research_sources: "list[str]" = []
+
+    @field_validator("probability_yes")
+    @classmethod
+    def _unit_interval(cls, v: float) -> float:
+        if not 0.0 < v < 1.0:
+            raise ValueError(f"probability_yes must be in (0, 1), got {v}")
+        return v
+
+    def probability_for(self, index: int) -> float:
+        """P(outcome at `index`) for a two-outcome market."""
+        if index == 0:
+            return self.probability_yes
+        if index == 1:
+            return 1.0 - self.probability_yes
+        raise ValueError(f"only two-outcome markets are supported, got {index}")
+
+
+class Candidate(BaseModel):
+    """A scored outcome: the forecast, the live ask, and the resulting size."""
+
+    token_id: str
+    outcome: str
+    market_question: str
+    probability: float
+    ask_price: float
+    edge: float
+    expected_value: float
+    full_kelly: float
+    size_fraction: float
+    available_notional: float
+    reasoning: str = ""
+    research_sources: "list[str]" = []
+
+
+class OrderPlan(BaseModel):
+    """A fully resolved, checked order, ready to send or to log in a dry run."""
+
+    token_id: str
+    outcome: str
+    side: str
+    amount_usdc: float
+    limit_price: float
+    expected_shares: float
+    market_question: str
+    probability: float = 0.0
+    edge: float = 0.0
+    expected_value: float = 0.0
 
 
 class ClobReward(BaseModel):
