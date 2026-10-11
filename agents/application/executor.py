@@ -23,7 +23,10 @@ from agents.utils.objects import (
     Candidate,
     OrderPlan,
 )
+from agents.application.research import Research
 from agents.application.strategy import evaluate_both_sides
+from agents.connectors.news import News
+from agents.connectors.search import Search
 from agents.application.prompts import Prompter
 from agents.polymarket.polymarket import Polymarket
 
@@ -55,6 +58,7 @@ class Executor:
         self.gamma = Gamma()
         self.chroma = Chroma()
         self.polymarket = Polymarket()
+        self.research = Research(news=News(), search=Search())
 
     def get_llm_response(self, user_input: str) -> str:
         system_message = SystemMessage(content=str(self.prompter.market_analyst()))
@@ -254,15 +258,28 @@ class Executor:
         question = market["question"]
         description = market_document["page_content"]
 
+        # Best-effort; a research outage downgrades the forecast rather than
+        # aborting the run, and the downgrade is recorded rather than hidden.
+        gathered = self.research.gather(question)
+
         prompt = self.prompter.superforecaster(
-            question, description, outcomes, market["outcome_prices"]
+            question,
+            description,
+            outcomes,
+            market["outcome_prices"],
+            research=gathered["context"],
+            has_research=bool(gathered["sources"]),
         )
         analysis = self.llm.invoke(prompt).content
 
         prompt = self.prompter.probability_only(question, analysis, outcomes)
         probability = self.parse_probability(self.llm.invoke(prompt).content)
 
-        return MarketForecast(probability_yes=probability, reasoning=analysis[:500])
+        return MarketForecast(
+            probability_yes=probability,
+            reasoning=analysis[:500],
+            research_sources=gathered["sources"],
+        )
 
     def score_market(
         self,

@@ -116,18 +116,47 @@ class Prompter:
         description: str,
         outcomes: List[str],
         outcome_prices: str = "",
+        research: str = "",
+        has_research: bool = False,
     ) -> str:
         """Work the analysis out in writing, before committing to a number.
 
-        The market price is included deliberately: step 3 asks the model to
-        argue why the price might be right and it wrong, which it cannot do
-        without seeing the price. The written analysis is the reasoning the
-        probability is then extracted from.
+        The market price is included deliberately: the market-calibration step
+        asks the model to argue why the price might be right and it wrong,
+        which it cannot do without seeing the price.
+
+        `has_research` is passed separately from `research` so the blind case
+        is explicit rather than inferred from an empty string: a forecaster
+        with no current information must be told to stay near the market
+        price, not left to improvise confidence.
         """
+        if has_research:
+            evidence_block = f"""
+        Current information gathered for this market:
+
+        {research}
+
+        Treat this as raw input, not as truth. Check dates: a headline from
+        before a decisive event is not current. Note what it does NOT tell
+        you.
+        """
+        else:
+            evidence_block = """
+        NO current information was available for this market. You are
+        forecasting from the description above and your own prior knowledge
+        only, which may be out of date.
+
+        This is a severe limitation and it must show in your answer. Traders
+        setting the current price can read today's news and you cannot. Unless
+        the description alone settles the question, you have no basis for
+        disagreeing with the price, so your probability should stay close to
+        it.
+        """
+
         return f"""
         You are a highly specialised analyst for prediction markets. Your goal
-        is not to be right; it is to find the true mathematical probability of
-        an event.
+        is to find the mathematically most precise probability for the outcome
+        of an event - not to be right, and not to find a trade.
 
         Question: `{question}`
         Description: `{description}`
@@ -138,34 +167,36 @@ class Prompter:
         On a prediction market the price of an outcome IS the market's implied
         probability of it. A price of 0.65 means the market collectively
         believes there is a 65% chance.
+        {evidence_block}
+        Work through all four rules in writing. Be specific: cite the concrete
+        facts, dates and base rates you are reasoning from.
 
-        Work through all four steps in writing. Be specific; cite the concrete
-        facts and base rates you are reasoning from.
+        1. Data-based evidence FOR yes:
+            - Hard facts and current data supporting a positive outcome.
+            - Name the source and date of each. "It seems likely" is not
+              evidence.
 
-        1. Evidence FOR yes:
-            - The strongest arguments and data pointing to a positive outcome.
+        2. The advocatus diaboli principle:
+            - Actively search for every reason the event does NOT happen.
+            - Question your own assumptions from step 1. Which of them is
+              weakest, and what happens to your estimate if it is wrong?
+            - If you cannot argue the "no" case convincingly, you do not
+              understand the question well enough to put a number on it.
 
-        2. Evidence FOR no:
-            - Actively look for reasons the event does NOT happen.
-            - Be your own harshest critic. Do not treat this section as a
-              formality: if you cannot argue the other side convincingly, you
-              do not understand the question well enough to trade it.
+        3. Market calibration:
+            - If the current price differs markedly from your view, ask: what
+              information does the market have that I have overlooked?
+            - Resolution criteria are a common answer. Re-read the description
+              and check that you are pricing the question that will actually
+              be settled, not the one you assume.
+            - Name your blind spot explicitly, then decide whether you still
+              disagree.
 
-        3. Market check:
-            - Why might the current market price be right and you wrong?
-            - The other traders may hold information you do not, may be closer
-              to the event, or may understand the resolution criteria better.
-            - Name your blind spot explicitly. What would you need to know to
-              be confident the market is mispriced, and do you actually know
-              it?
-
-        4. Calibration:
-            - Be careful with extreme numbers. Reality almost always leaves
-              residual uncertainty, so avoid 0.0 and 1.0.
-            - If after steps 1 to 3 you have no specific reason the market is
-              wrong, your probability should land close to the market price.
-              Disagreeing with the market is a claim that needs evidence, not
-              a default.
+        4. No extremes:
+            - Be extremely careful with 0% and 100%. In the real world there
+              is almost always residual uncertainty, so never use 0.0 or 1.0.
+            - Disagreeing with the market is a claim that requires evidence.
+              Absent such evidence, land close to the market price.
 
         End with one sentence stating your probability for `{outcomes[0]}`.
         """

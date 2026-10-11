@@ -17,13 +17,14 @@
 > | A4 Kein Slippage-Schutz | behoben (Cap, Mindestliquidität, Mindestgröße, Max-Order) |
 > | A5 Kein Check auf geschlossene Märkte | behoben (Markt-Ebene) |
 > | A6 Marktauswahl ohne Bewertung | Edge/Kelly statt Ähnlichkeit — aber **Kalibrierung unbewiesen** |
+> | A8 Forecaster ohne aktuelle Daten | behoben (News/Tavily verdrahtet) — **ohne Key blind** |
 > | A7 Unbegrenzte Rekursion | behoben (3 Versuche, Backoff) |
 > | B1 `requirements.txt` nicht installierbar | behoben (verifiziert auf 3.11) |
 > | B2 Keine On-Chain-Approvals | behoben (`cli.py set-approvals`, Einmal-Lauf) |
 > | B3 Proxy-Wallet nicht unterstützt | behoben (`POLYMARKET_SIGNATURE_TYPE`/`_FUNDER`) |
 > | B4 Trade auskommentiert | ersetzt durch Dry-Run-Schalter |
 > | C1 Prompt-f-String-Bug | behoben (beide Stellen) |
-> | C2 Keine Tests | 62 Tests (Order-Pfad, Edge/Kelly, Journal, Forecaster) |
+> | C2 Keine Tests | 73 Tests (Order-Pfad, Edge/Kelly, Journal, Forecaster, Research) |
 > | C3 `cron.py` nicht lauffähig | behoben |
 > | C4 `build_order` ignoriert Preis | **offen** (von diesem Pfad unbenutzt) |
 > | C5 Keine Paginierung | **offen** (`pdb`-Import entfernt) |

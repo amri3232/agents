@@ -62,6 +62,7 @@ def evaluate_candidate(
     kelly_multiplier: float,
     max_fraction: float,
     reasoning: str = "",
+    research_sources: Optional[List[str]] = None,
 ) -> Optional[Candidate]:
     """Score one side of a market, or return None if it fails a gate.
 
@@ -96,6 +97,7 @@ def evaluate_candidate(
         size_fraction=fraction,
         available_notional=available_notional,
         reasoning=reasoning,
+        research_sources=list(research_sources or []),
     )
 
 
@@ -136,6 +138,7 @@ def evaluate_both_sides(
             kelly_multiplier=kelly_multiplier,
             max_fraction=max_fraction,
             reasoning=forecast.reasoning,
+            research_sources=forecast.research_sources,
         )
         if candidate is not None:
             scored.append(candidate)

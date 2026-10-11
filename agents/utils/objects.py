@@ -62,6 +62,9 @@ class MarketForecast(BaseModel):
 
     probability_yes: float
     reasoning: str = ""
+    # Which research sources answered. Empty means the forecast was made
+    # blind, which calibration analysis must be able to separate out.
+    research_sources: "list[str]" = []
 
     @field_validator("probability_yes")
     @classmethod
@@ -93,6 +96,7 @@ class Candidate(BaseModel):
     size_fraction: float
     available_notional: float
     reasoning: str = ""
+    research_sources: "list[str]" = []
 
 
 class OrderPlan(BaseModel):

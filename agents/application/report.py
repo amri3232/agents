@@ -93,6 +93,30 @@ def summarise(path: str) -> str:
             f"said {mean_p:.2f}  actual {hit:.2f}  gap {hit - mean_p:+.2f}"
         )
 
+    with_data = [r for r in resolved if r.get("research_sources")]
+    blind = [r for r in resolved if not r.get("research_sources")]
+    if with_data and blind:
+        lines += ["", "  split by whether current information was available:"]
+        for label, group in (("with data", with_data), ("blind", blind)):
+            mean_p = sum(float(r["probability"]) for r in group) / len(group)
+            hit = sum(1 for r in group if r["resolved"]) / len(group)
+            lines.append(
+                f"    {label:10} n={len(group):3d}  said {mean_p:.2f}  "
+                f"actual {hit:.2f}  gap {hit - mean_p:+.2f}"
+            )
+        lines += [
+            "    A blind forecaster cannot know what the market knows, so a",
+            "    negative gap there is expected. If the gap is no better with",
+            "    data, the research is not buying you an edge.",
+        ]
+    elif blind and not with_data:
+        lines += [
+            "",
+            "  Every forecast here was made blind: no news or search source",
+            "  answered. Set TAVILY_API_KEY and/or NEWSAPI_API_KEY, or expect",
+            "  no edge - the market reads today's news and the agent did not.",
+        ]
+
     pnl = 0.0
     for r in resolved:
         stake = float(r.get("size_fraction", 0)) * float(r.get("available_notional", 0))

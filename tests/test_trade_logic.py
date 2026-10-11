@@ -12,6 +12,8 @@ from unittest.mock import MagicMock
 
 from agents.application.executor import Executor
 from agents.application.journal import Journal
+from agents.application.prompts import Prompter
+from agents.application.research import Research
 from agents.application.strategy import (
     evaluate_both_sides,
     evaluate_candidate,
@@ -446,6 +448,109 @@ class TestJournal(unittest.TestCase):
 
     def test_missing_journal_reports_zero_spend(self):
         self.assertEqual(Journal(self.path + ".nope").spent_today(), 0.0)
+
+
+class TestResearch(unittest.TestCase):
+    """Research is best-effort: a source outage downgrades, never aborts."""
+
+    def test_no_sources_configured_is_blind_not_an_error(self):
+        got = Research().gather("Will it happen?")
+        self.assertEqual(got["sources"], [])
+        self.assertEqual(got["context"], "")
+
+    def test_unavailable_sources_are_skipped(self):
+        news, search = MagicMock(), MagicMock()
+        news.available = False
+        search.available = False
+        got = Research(news=news, search=search).gather("Q?")
+        self.assertEqual(got["sources"], [])
+        search.get_context.assert_not_called()
+        news.get_articles_for_question.assert_not_called()
+
+    def test_search_context_is_collected(self):
+        search = MagicMock()
+        search.available = True
+        search.get_context.return_value = "some web context"
+        got = Research(search=search).gather("Q?")
+        self.assertEqual(got["sources"], ["tavily"])
+        self.assertIn("some web context", got["context"])
+
+    def test_news_headlines_are_formatted_with_dates(self):
+        news = MagicMock()
+        news.available = True
+        news.get_articles_for_question.return_value = [
+            {
+                "title": "Something happened",
+                "publishedAt": "2026-10-09T12:00:00Z",
+                "source": {"name": "Reuters"},
+                "description": "Details here",
+            }
+        ]
+        got = Research(news=news).gather("Q?")
+        self.assertEqual(got["sources"], ["newsapi"])
+        self.assertIn("2026-10-09", got["context"])
+        self.assertIn("Reuters", got["context"])
+
+    def test_a_raising_source_does_not_abort(self):
+        search = MagicMock()
+        search.available = True
+        search.get_context.side_effect = RuntimeError("rate limited")
+        got = Research(search=search).gather("Q?")
+        self.assertEqual(got["sources"], [])
+        self.assertIn("unavailable", got["context"])
+
+    def test_empty_results_do_not_count_as_a_source(self):
+        search = MagicMock()
+        search.available = True
+        search.get_context.return_value = "   "
+        self.assertEqual(Research(search=search).gather("Q?")["sources"], [])
+
+    def test_articles_without_a_title_are_dropped(self):
+        news = MagicMock()
+        news.available = True
+        news.get_articles_for_question.return_value = [{"description": "orphan"}]
+        self.assertEqual(Research(news=news).gather("Q?")["sources"], [])
+
+    def test_context_is_truncated(self):
+        search = MagicMock()
+        search.available = True
+        search.get_context.return_value = "x" * 10000
+        got = Research(search=search).gather("Q?")
+        self.assertLessEqual(len(got["context"]), 4000)
+
+
+class TestBlindForecastPrompt(unittest.TestCase):
+    """A forecaster with no current data must be told to defer to the price."""
+
+    @staticmethod
+    def _flat(text):
+        """Collapse whitespace: the prompt wraps, assertions should not care."""
+        return " ".join(text.split())
+
+    def prompt(self, has_research):
+        return Prompter().superforecaster(
+            "Will it happen?",
+            "a description",
+            ["Yes", "No"],
+            '["0.40","0.60"]',
+            research="some context" if has_research else "",
+            has_research=has_research,
+        )
+
+    def test_blind_prompt_says_so_and_defers_to_the_market(self):
+        p = self._flat(self.prompt(False))
+        self.assertIn("NO current information was available", p)
+        self.assertIn("probability should stay close to it", p)
+        self.assertIn("severe limitation", p)
+
+    def test_researched_prompt_includes_the_context(self):
+        p = self._flat(self.prompt(True))
+        self.assertIn("some context", p)
+        self.assertNotIn("NO current information was available", p)
+
+    def test_price_is_always_present_for_the_calibration_step(self):
+        for has in (True, False):
+            self.assertIn("0.40", self.prompt(has))
 
 
 if __name__ == "__main__":
