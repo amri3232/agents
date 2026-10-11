@@ -122,6 +122,19 @@ This repo is inteded for use with Python 3.9
    python agents/application/trade.py
    ```
 
+### Check your setup first
+
+```
+python scripts/python/cli.py check-setup
+```
+
+This is the only thing that can tell you whether the agent works on your
+machine, because it is the only thing that touches the real dependencies. It
+verifies that the Gamma API still returns the fields this code reads (the pins
+are from mid-2024, so field drift is the most likely breakage), that the CLOB
+and orderbook answer, that your wallet resolves to a balance, and that your
+research keys work. Fix every `FAIL` before going further.
+
 ### Before you trade with real money
 
 **`POLYMARKET_DRY_RUN` defaults to `true`.** In that mode a run forecasts

@@ -286,7 +286,14 @@ class Polymarket:
             market = data[0]
             return self.map_api_to_market(market, token_id)
 
-    def map_api_to_market(self, market, token_id: str = "") -> SimpleMarket:
+    @staticmethod
+    def map_api_to_market(market, token_id: str = "") -> SimpleMarket:
+        """Map a Gamma API market payload onto SimpleMarket's fields.
+
+        Static because it reads nothing from the instance, which lets the
+        preflight check parse live markets without constructing a client (and
+        therefore without needing a private key).
+        """
         market = {
             "id": int(market["id"]),
             "question": market["question"],

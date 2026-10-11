@@ -8,10 +8,18 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from agents.application.executor import Executor
 from agents.application.journal import Journal
+from agents.application.preflight import (
+    REQUIRED_MARKET_FIELDS,
+    _check_required_env,
+    _check_research_env,
+    _check_safety,
+    format_results,
+    run_checks,
+)
 from agents.application.prompts import Prompter
 from agents.application.research import Research
 from agents.application.strategy import (
@@ -551,6 +559,75 @@ class TestBlindForecastPrompt(unittest.TestCase):
     def test_price_is_always_present_for_the_calibration_step(self):
         for has in (True, False):
             self.assertIn("0.40", self.prompt(has))
+
+
+class TestPreflight(unittest.TestCase):
+    """The checker must survive every dependency being broken at once."""
+
+    def test_a_raising_check_is_reported_not_propagated(self):
+        def boom():
+            raise ConnectionError("network unreachable")
+
+        results = run_checks([("gamma", boom)])
+        self.assertEqual(results[0][1], "fail")
+        self.assertIn("ConnectionError", results[0][2])
+
+    def test_one_broken_check_does_not_hide_the_others(self):
+        def boom():
+            raise RuntimeError("down")
+
+        results = run_checks([("a", boom), ("b", lambda: ("ok", "fine")), ("c", boom)])
+        self.assertEqual([r[1] for r in results], ["fail", "ok", "fail"])
+
+    def test_missing_required_env_fails(self):
+        with patch.dict(os.environ, {}, clear=True):
+            status, detail = _check_required_env()
+        self.assertEqual(status, "fail")
+        self.assertIn("OPENAI_API_KEY", detail)
+
+    def test_missing_research_env_warns_about_being_blind(self):
+        with patch.dict(os.environ, {}, clear=True):
+            status, detail = _check_research_env()
+        self.assertEqual(status, "warn")
+        self.assertIn("blind", detail)
+
+    def test_research_env_present_passes(self):
+        with patch.dict(os.environ, {"TAVILY_API_KEY": "x"}, clear=True):
+            status, detail = _check_research_env()
+        self.assertEqual(status, "ok")
+        self.assertIn("TAVILY_API_KEY", detail)
+
+    def test_live_trading_is_flagged_loudly(self):
+        with patch.dict(os.environ, {"POLYMARKET_DRY_RUN": "false"}, clear=True):
+            status, detail = _check_safety()
+        self.assertEqual(status, "warn")
+        self.assertIn("LIVE TRADING IS ON", detail)
+
+    def test_dry_run_is_the_default_when_unset(self):
+        with patch.dict(os.environ, {}, clear=True):
+            status, detail = _check_safety()
+        self.assertEqual(status, "ok")
+        self.assertIn("dry run", detail)
+
+    def test_summary_calls_out_failures(self):
+        out = format_results([("a", "fail", "broken")])
+        self.assertIn("FAILED", out)
+        self.assertIn("will not work", out)
+
+    def test_all_passing_does_not_claim_profitability(self):
+        out = format_results([("a", "ok", "fine")])
+        self.assertIn("does NOT", out)
+        self.assertIn("journal-report", out)
+
+    def test_required_market_fields_match_the_parser(self):
+        """If map_api_to_market gains a field, this check must gain it too."""
+        import inspect
+
+        from agents.polymarket.polymarket import Polymarket
+
+        source = inspect.getsource(Polymarket.map_api_to_market)
+        for field in REQUIRED_MARKET_FIELDS:
+            self.assertIn(f'"{field}"', source, f"{field} is checked but not parsed")
 
 
 if __name__ == "__main__":
