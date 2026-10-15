@@ -1,0 +1,9 @@
+# Laufzeit-Abhängigkeiten des Polymarket-BTC-5m-Bots (getestet mit Python 3.13; ab 3.10 empfohlen)
+py-clob-client>=0.34.0     # Offizieller Polymarket-CLOB-Client (Orders signieren/senden)
+web3>=7.0.0,<9             # Polygon-Transaktionen (Redeem, Token-Freigaben)
+eth-account>=0.13.0        # Wallet-Signierung
+aiohttp>=3.9               # asynchrone HTTP-/WebSocket-Aufrufe (Preisfeeds, Orderbücher, Gamma)
+requests>=2.31             # von einigen Web3-/Client-Pfaden genutzt
+python-dotenv>=1.0         # .env laden
+pandas>=2.0                # Auswertung (--report)
+numpy>=1.26

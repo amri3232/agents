@@ -1,0 +1,11 @@
+.env
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+logs/*
+!logs/.gitkeep
+data/*
+!data/.gitkeep
+*.pid
+nohup.out
