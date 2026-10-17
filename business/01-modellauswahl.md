@@ -25,7 +25,7 @@ Die einzige gefundene Datenbasis nennt einen Median von ca. 145 $ MRR, bei etwa 
 
 ## Das gewählte Modell konkret
 
-**Arbeitstitel: Freelancer-Starter-Kit (DACH, deutschsprachig).** Die Nische ist ein Vorschlag und leicht austauschbar. Produktion, Seite und Funnel bleiben bei einem Nischenwechsel wiederverwendbar.
+**Arbeitstitel: Freelancer-Starter-Kit (zunächst Deutschland, deutschsprachig).** Die Nische ist ein Vorschlag und leicht austauschbar. Produktion, Seite und Funnel bleiben bei einem Nischenwechsel wiederverwendbar.
 
 - **Gratis-Tool (Lead-Magnet):** Stundensatz-Rechner für Selbstständige, statisch in HTML/JS, ohne Backend. Er dient als SEO-Magnet für Suchen wie „Stundensatz berechnen Freelancer".
 - **Bezahlprodukt (Startpreis 29 €, wird getestet):** Angebots- und Projektvorlagen (Docs/Sheets/PDF), Onboarding-Fragebogen für Kunden, Kalkulations-Sheet, Mail-Textbausteine für Akquise und Nachfassen, 100+ KI-Prompts für Angebote und Kundenkommunikation.
