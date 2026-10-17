@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stundensatz berechnen für Freelancer und Selbstständige | Gratis-Rechner</title>
+<meta name="description" content="Berechne deinen Mindest-Stundensatz als Freelancer: mit Wunsch-Netto, Abgaben, Kosten, Urlaub und abrechenbarer Zeit. Kostenlos, ohne Anmeldung, ohne Datenspeicherung.">
+<link rel="canonical" href="{{SITE_URL}}/{{PAGE_PATH}}">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="de_DE">
+<meta property="og:title" content="Stundensatz berechnen für Freelancer und Selbstständige">
+<meta property="og:description" content="Gratis-Rechner für deinen Mindest-Stundensatz. Ohne Anmeldung, die Eingaben bleiben in deinem Browser.">
+<meta property="og:url" content="{{SITE_URL}}/{{PAGE_PATH}}">
+<meta name="twitter:card" content="summary">
+{{include:head-common.html}}
+<script defer src="{{ROOT}}assets/rechner.js"></script>
+</head>
+<body>
+{{include:header.html}}
+<main id="main">
+
+<section class="hero" style="padding-bottom:28px">
+  <div class="container">
+    <span class="eyebrow">Gratis-Rechner</span>
+    <h1>Stundensatz berechnen für Freelancer und Selbstständige</h1>
+    <p class="lead">Trage ein, was du verdienen möchtest und was dich dein Geschäft kostet. Der Rechner zeigt, welchen Stundensatz du mindestens brauchst. Alles läuft in deinem Browser, deine Eingaben werden nicht gespeichert oder verschickt.</p>
+  </div>
+</section>
+
+<section class="section" style="padding-top:8px">
+  <div class="container calc">
+    <form id="rechner-form" novalidate autocomplete="off" aria-label="Eingaben für den Stundensatz">
+      <fieldset>
+        <legend>Was du verdienen möchtest</legend>
+        <div class="field">
+          <label for="nettoWunsch">Wunsch-Netto pro Monat</label>
+          <div class="input-wrap"><input id="nettoWunsch" name="nettoWunsch" type="text" inputmode="decimal" value="3000"><span class="unit">€</span></div>
+          <span class="hint">Was soll nach Steuern und Vorsorge privat übrig bleiben?</span>
+        </div>
+        <div class="field">
+          <label for="abgabenquote">Abgabenquote auf den Gewinn</label>
+          <div class="input-wrap"><input id="abgabenquote" name="abgabenquote" type="text" inputmode="decimal" value="30"><span class="unit">%</span></div>
+          <span class="hint">Schätzung für Einkommensteuer sowie Kranken-, Pflege- und Rentenvorsorge. Den passenden Wert klärst du mit deinem Steuerberater.</span>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Was dein Geschäft kostet</legend>
+        <div class="field">
+          <label for="fixkosten">Geschäftskosten pro Monat</label>
+          <div class="input-wrap"><input id="fixkosten" name="fixkosten" type="text" inputmode="decimal" value="400"><span class="unit">€</span></div>
+          <span class="hint">Software, Versicherungen, Büro, Weiterbildung, Marketing, Buchhaltung …</span>
+        </div>
+        <div class="field">
+          <label for="puffer">Puffer und Rücklage</label>
+          <div class="input-wrap"><input id="puffer" name="puffer" type="text" inputmode="decimal" value="10"><span class="unit">%</span></div>
+          <span class="hint">Aufschlag auf den Umsatzbedarf für Flauten, Anschaffungen und Unvorhergesehenes.</span>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Wie viel du arbeitest</legend>
+        <div class="two">
+          <div class="field">
+            <label for="tageWoche">Arbeitstage pro Woche</label>
+            <div class="input-wrap"><input id="tageWoche" name="tageWoche" type="text" inputmode="decimal" value="5"><span class="unit">Tage</span></div>
+          </div>
+          <div class="field">
+            <label for="stundenTag">Stunden pro Arbeitstag</label>
+            <div class="input-wrap"><input id="stundenTag" name="stundenTag" type="text" inputmode="decimal" value="8"><span class="unit">h</span></div>
+          </div>
+        </div>
+        <div class="two">
+          <div class="field">
+            <label for="urlaub">Urlaubstage pro Jahr</label>
+            <div class="input-wrap"><input id="urlaub" name="urlaub" type="text" inputmode="decimal" value="25"><span class="unit">Tage</span></div>
+          </div>
+          <div class="field">
+            <label for="feiertage">Feiertage pro Jahr</label>
+            <div class="input-wrap"><input id="feiertage" name="feiertage" type="text" inputmode="decimal" value="10"><span class="unit">Tage</span></div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="krank">Krankheits- und Ausfalltage pro Jahr</label>
+          <div class="input-wrap"><input id="krank" name="krank" type="text" inputmode="decimal" value="8"><span class="unit">Tage</span></div>
+          <span class="hint">Urlaubs-, Feier- und Ausfalltage, die auf deine Arbeitstage fallen.</span>
+        </div>
+        <div class="field">
+          <label for="abrechenbar">Anteil abrechenbarer Stunden</label>
+          <div class="input-wrap"><input id="abrechenbar" name="abrechenbar" type="text" inputmode="decimal" value="60"><span class="unit">%</span></div>
+          <span class="hint">Akquise, Verwaltung, Buchhaltung und Weiterbildung kannst du nicht berechnen. Häufig sind 50 bis 70 Prozent realistisch.</span>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Umsatzsteuer</legend>
+        <div class="two">
+          <div class="field">
+            <label for="kleinunternehmer">Kleinunternehmerregelung?</label>
+            <div class="input-wrap">
+              <select id="kleinunternehmer" name="kleinunternehmer">
+                <option value="nein" selected>Nein</option>
+                <option value="ja">Ja (§ 19 UStG)</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label for="ustSatz">Umsatzsteuersatz</label>
+            <div class="input-wrap"><input id="ustSatz" name="ustSatz" type="text" inputmode="decimal" value="19"><span class="unit">%</span></div>
+          </div>
+        </div>
+        <span class="hint" style="margin-bottom:14px;display:block">Ob die Kleinunternehmerregelung für dich gilt, klärst du mit deinem Steuerberater.</span>
+      </fieldset>
+    </form>
+
+    <aside class="card result" aria-labelledby="ergebnis-titel">
+      <h2 id="ergebnis-titel" style="font-size:1.1rem;margin:0">Dein Mindest-Stundensatz</h2>
+      <div id="fehler" role="alert" hidden></div>
+      <div id="ergebnis" aria-live="polite">
+        <div class="big" id="r-satz">–</div>
+        <div class="muted">pro Stunde, netto</div>
+        <dl>
+          <dt>Tagessatz (netto)</dt><dd id="r-tag">–</dd>
+          <dt>Stundensatz brutto</dt><dd id="r-brutto">–</dd>
+          <dt>Abrechenbare Stunden pro Jahr</dt><dd id="r-stunden">–</dd>
+          <dt>Benötigter Gewinn vor Abgaben</dt><dd id="r-gewinn">–</dd>
+          <dt>Geschäftskosten pro Jahr</dt><dd id="r-kosten">–</dd>
+          <dt>Umsatzziel inkl. Puffer</dt><dd id="r-ziel">–</dd>
+        </dl>
+        <h3 style="font-size:1rem;margin:20px 0 4px">Bei anderer Auslastung</h3>
+        <table>
+          <thead><tr><th scope="col">Abrechenbar</th><th scope="col">Stundensatz netto</th></tr></thead>
+          <tbody id="r-sens"></tbody>
+        </table>
+        <div class="notice" id="r-warn" hidden style="margin-top:16px"></div>
+      </div>
+      <p class="muted small" style="margin:16px 0 0">Eine Rechenhilfe, keine Steuer- oder Rechtsberatung. Prüfe das Ergebnis gegen das, was dein Markt zahlt.</p>
+    </aside>
+  </div>
+</section>
+
+<section class="section alt">
+  <div class="container narrow prose">
+    <h2>So rechnet der Stundensatz-Rechner</h2>
+    <p>Die Rechnung läuft von deinem Ziel rückwärts zum Stundensatz:</p>
+    <ol>
+      <li><strong>Gewinn vor Abgaben:</strong> Wunsch-Netto × 12, geteilt durch (1 − Abgabenquote). Wer 3.000 € netto im Monat braucht und 30 % Abgaben einplant, muss etwa 51.400 € Gewinn im Jahr erwirtschaften.</li>
+      <li><strong>Umsatzbedarf:</strong> Gewinn plus Geschäftskosten, dazu ein Puffer als Aufschlag.</li>
+      <li><strong>Arbeitstage:</strong> 52 Wochen × Arbeitstage pro Woche, abzüglich Urlaub, Feiertage und Ausfalltage.</li>
+      <li><strong>Abrechenbare Stunden:</strong> Arbeitstage × Stunden pro Tag × Anteil abrechenbar.</li>
+      <li><strong>Stundensatz:</strong> Umsatzbedarf geteilt durch abrechenbare Stunden.</li>
+    </ol>
+
+    <h2>Häufige Fehler bei der Stundensatz-Berechnung</h2>
+    <h3>Alle Arbeitsstunden als abrechenbar zu rechnen</h3>
+    <p>Wer 40 Stunden pro Woche arbeitet, berechnet selten 40 Stunden. Akquise, Angebote, Buchhaltung, E-Mails und Weiterbildung gehören zum Beruf, bringen aber keinen direkten Umsatz. Ein Anteil von 50 bis 70 Prozent ist üblich. Wer 90 Prozent ansetzt, rechnet sich meist einen zu niedrigen Stundensatz.</p>
+    <h3>Urlaub und Krankheit zu vergessen</h3>
+    <p>Als Selbstständige/r bekommst du im Urlaub und bei Krankheit kein Gehalt. Diese Tage fehlen im Jahr, und dein Satz muss sie mittragen.</p>
+    <h3>Abgaben und Vorsorge zu unterschätzen</h3>
+    <p>Neben der Einkommensteuer fallen Beiträge zur Kranken- und Pflegeversicherung an, und die Altersvorsorge zahlt niemand für dich. Welche Quote für dich passt, hängt von deiner Situation ab. Bitte kläre das mit einem Steuerberater und nutze die Zahl im Rechner nur als Schätzung.</p>
+    <h3>Den Markt zu ignorieren</h3>
+    <p>Der Rechner nennt dir die Untergrenze, die du für dein Ziel brauchst. Was Kunden bereit sind zu zahlen, hängt von Branche, Erfahrung und Nutzen ab. Liegt dein Mindestsatz über dem Marktniveau, hilft es oft mehr, Pakete mit Festpreisen und klarem Ergebnis anzubieten, als den Stundensatz zu senken.</p>
+
+    <h2>Häufige Fragen</h2>
+    <details>
+      <summary>Was ist ein realistischer Stundensatz für Freelancer?</summary>
+      <div class="answer"><p>Das hängt stark von Branche, Erfahrung und Region ab, und pauschale Zahlen sind selten verlässlich. Nutze den Rechner für deine Untergrenze und vergleiche sie mit Angeboten von Kolleginnen und Kollegen in deinem Bereich.</p></div>
+    </details>
+    <details>
+      <summary>Wie berechne ich einen Tagessatz?</summary>
+      <div class="answer"><p>Der Tagessatz entspricht dem Stundensatz mal den Stunden pro Arbeitstag. Der Rechner zeigt ihn direkt unter dem Stundensatz an. Viele Selbstständige runden ihn und bieten Tagessätze als Paket an.</p></div>
+    </details>
+    <details>
+      <summary>Werden meine Eingaben gespeichert?</summary>
+      <div class="answer"><p>Nein. Die Berechnung läuft vollständig in deinem Browser. Es werden keine Eingaben an einen Server gesendet und keine Cookies gesetzt.</p></div>
+    </details>
+    <details>
+      <summary>Warum unterscheiden sich Netto- und Bruttosatz?</summary>
+      <div class="answer"><p>Der Nettosatz ist der Betrag ohne Umsatzsteuer. Wenn du umsatzsteuerpflichtig bist, stellst du Umsatzsteuer in Rechnung, und der Bruttosatz zeigt den Betrag inklusive. Als Kleinunternehmer nach § 19 UStG weist du keine Umsatzsteuer aus.</p></div>
+    </details>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container narrow">
+    <div class="cta-box">
+      <h2>Vom Stundensatz zum Angebot</h2>
+      <p>Mit deinem Stundensatz fängt die Arbeit erst an: Projekte kalkulieren, Pakete bilden, ein klares Angebot schreiben. Das {{PRODUCT_NAME}} enthält dafür eine Kalkulations-Tabelle, eine Angebotsvorlage und {{MAIL_COUNT}} Mail-Bausteine.</p>
+      <a class="btn btn-primary" href="{{ROOT}}#inhalt">Kit ansehen ({{PRICE_EUR}} €)</a>
+    </div>
+  </div>
+</section>
+
+</main>
+{{include:footer.html}}
+</body>
+</html>
