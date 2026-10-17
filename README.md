@@ -124,6 +124,38 @@ This repo is inteded for use with Python 3.9
    ./scripts/bash/run-docker-dev.sh
    ```
 
+## Automated trading
+
+The autonomous trader (`agents/application/trade.py`) can run unattended, on a schedule, with hard risk limits. It is a **dry run by default**: it analyses markets, sizes a trade and logs it, but places no order.
+
+```
+# one run, dry run
+python scripts/python/cli.py run-autonomous-trader
+
+# on a schedule (every 24h by default), dry run
+python scripts/python/cli.py run-trading-loop --interval-minutes 1440
+
+# review what it did and what it spent today
+python scripts/python/cli.py show-trade-log
+```
+
+Real orders need **both** `--live` on the command line **and** `ALLOW_LIVE_TRADING=true` in `.env`. Without the variable, `--live` refuses to start. Please read the [Polymarket terms of service](https://polymarket.com/tos) first, trading may be restricted where you live.
+
+Every run is checked against these limits (set in `.env`, see `.env.example`):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MAX_SIZE_FRACTION` | `0.05` | Largest share of your USDC balance per trade, whatever the model asks for |
+| `MAX_ORDER_USDC` | `5` | Largest single order |
+| `MAX_DAILY_USDC` | `20` | Total live spend per UTC day, counted from the trade log |
+| `MIN_ORDER_USDC` | `1` | Smaller orders are skipped |
+
+How a run behaves:
+
+- Only `BUY` is supported, and the model has to name one of the market's outcomes. It is never guessed, so an answer without a valid outcome is rejected.
+- Only the analysis step is retried (`--max-attempts`, default 3, with backoff). An order is never retried, so a flaky response cannot double-order. If the order call itself fails, the amount still counts against the daily limit because the order may have gone through.
+- Every run, including rejections and errors, is appended to `trade_log.jsonl` (`TRADE_LOG_PATH`), which is also what the daily limit reads from.
+
 ## Architecture
 
 The Polymarket Agents architecture features modular components that can be maintained and extended by individual community members.

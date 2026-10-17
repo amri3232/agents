@@ -1,7 +1,13 @@
+from agents.application.automation import (
+    AutomatedTrader,
+    NoTradeFound,
+    TradeProposal,
+)
 from agents.application.executor import Executor as Agent
 from agents.polymarket.gamma import GammaMarketClient as Gamma
 from agents.polymarket.polymarket import Polymarket
 
+import ast
 import shutil
 
 
@@ -24,45 +30,70 @@ class Trader:
         except:
             pass
 
-    def one_best_trade(self) -> None:
+    def find_best_trade(self) -> TradeProposal:
+        """
+
+        find_best_trade evaluates all events, markets, and orderbooks
+
+        leverages all available information sources accessible to the autonomous agent
+
+        and returns the trade the agent would make, without placing it
+
+        """
+        self.pre_trade_logic()
+
+        events = self.polymarket.get_all_tradeable_events()
+        print(f"1. FOUND {len(events)} EVENTS")
+
+        filtered_events = self.agent.filter_events_with_rag(events)
+        print(f"2. FILTERED {len(filtered_events)} EVENTS")
+
+        markets = self.agent.map_filtered_events_to_markets(filtered_events)
+        print()
+        print(f"3. FOUND {len(markets)} MARKETS")
+
+        print()
+        filtered_markets = self.agent.filter_markets(markets)
+        print(f"4. FILTERED {len(filtered_markets)} MARKETS")
+        if not filtered_markets:
+            raise NoTradeFound("no market passed the filters")
+
+        market = filtered_markets[0]
+        best_trade = self.agent.source_best_trade(market)
+        print(f"5. CALCULATED TRADE {best_trade}")
+
+        metadata = market[0].dict()["metadata"]
+        return TradeProposal(
+            question=metadata["question"],
+            outcomes=ast.literal_eval(metadata["outcomes"]),
+            outcome_prices=[
+                float(p) for p in ast.literal_eval(metadata["outcome_prices"])
+            ],
+            raw_trade=best_trade,
+            market=market,
+        )
+
+    def get_balance(self) -> float:
+        return self.polymarket.get_usdc_balance()
+
+    def execute(self, proposal: TradeProposal, amount: float, outcome_index: int):
+        # Please refer to TOS before trading: polymarket.com/tos
+        return self.polymarket.execute_market_order(
+            proposal.market, amount, outcome_index
+        )
+
+    def one_best_trade(self, live: bool = False) -> dict:
         """
 
         one_best_trade is a strategy that evaluates all events, markets, and orderbooks
 
         leverages all available information sources accessible to the autonomous agent
 
-        then executes that trade without any human intervention
+        then, in live mode only, executes that trade without any human intervention.
+        Live mode additionally requires ALLOW_LIVE_TRADING=true, see automation.py
 
         """
-        try:
-            self.pre_trade_logic()
-
-            events = self.polymarket.get_all_tradeable_events()
-            print(f"1. FOUND {len(events)} EVENTS")
-
-            filtered_events = self.agent.filter_events_with_rag(events)
-            print(f"2. FILTERED {len(filtered_events)} EVENTS")
-
-            markets = self.agent.map_filtered_events_to_markets(filtered_events)
-            print()
-            print(f"3. FOUND {len(markets)} MARKETS")
-
-            print()
-            filtered_markets = self.agent.filter_markets(markets)
-            print(f"4. FILTERED {len(filtered_markets)} MARKETS")
-
-            market = filtered_markets[0]
-            best_trade = self.agent.source_best_trade(market)
-            print(f"5. CALCULATED TRADE {best_trade}")
-
-            amount = self.agent.format_trade_prompt_for_execution(best_trade)
-            # Please refer to TOS before uncommenting: polymarket.com/tos
-            # trade = self.polymarket.execute_market_order(market, amount)
-            # print(f"6. TRADED {trade}")
-
-        except Exception as e:
-            print(f"Error {e} \n \n Retrying")
-            self.one_best_trade()
+        return AutomatedTrader(self, live=live).run_once()
 
     def maintain_positions(self):
         pass

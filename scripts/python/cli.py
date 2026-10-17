@@ -1,9 +1,18 @@
+import logging
+from datetime import timedelta
+
 import typer
 from devtools import pprint
 
 from agents.polymarket.polymarket import Polymarket
 from agents.connectors.chroma import PolymarketRAG
 from agents.connectors.news import News
+from agents.application.automation import (
+    AutomatedTrader,
+    LiveTradingNotEnabled,
+    TradeLedger,
+)
+from agents.application.cron import TradingAgent
 from agents.application.trade import Trader
 from agents.application.executor import Executor
 from agents.application.creator import Creator
@@ -115,13 +124,62 @@ def ask_polymarket_llm(user_input: str) -> None:
     print(f"LLM + current markets&events response: {response}")
 
 
+LIVE_HELP = "Place real orders. Also needs ALLOW_LIVE_TRADING=true, otherwise this is a dry run."
+
+
+def _setup_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
+
+
 @app.command()
-def run_autonomous_trader() -> None:
+def run_autonomous_trader(
+    live: bool = typer.Option(False, "--live", help=LIVE_HELP),
+    max_attempts: int = typer.Option(3, help="Tries for the analysis step."),
+) -> None:
     """
-    Let an autonomous system trade for you.
+    Let an autonomous system trade for you. Dry run unless --live is given.
     """
-    trader = Trader()
-    trader.one_best_trade()
+    _setup_logging()
+    try:
+        agent = AutomatedTrader(Trader(), live=live, max_attempts=max_attempts)
+    except LiveTradingNotEnabled as e:
+        print(f"Refusing to start: {e}")
+        raise typer.Exit(code=2)
+    pprint(agent.run_once())
+
+
+@app.command()
+def run_trading_loop(
+    interval_minutes: int = typer.Option(1440, help="Minutes between runs."),
+    live: bool = typer.Option(False, "--live", help=LIVE_HELP),
+    max_attempts: int = typer.Option(3, help="Tries for the analysis step."),
+) -> None:
+    """
+    Run the autonomous trader on a schedule until stopped.
+    """
+    _setup_logging()
+    try:
+        agent = TradingAgent(
+            interval=timedelta(minutes=interval_minutes),
+            live=live,
+            max_attempts=max_attempts,
+        )
+    except LiveTradingNotEnabled as e:
+        print(f"Refusing to start: {e}")
+        raise typer.Exit(code=2)
+    agent.start()
+
+
+@app.command()
+def show_trade_log(limit: int = 10) -> None:
+    """
+    Show the most recent automated trading runs and today's live spend.
+    """
+    ledger = TradeLedger()
+    pprint(ledger.read()[-limit:])
+    print(f"Spent today (live): {ledger.spent_today():.2f} USDC")
 
 
 if __name__ == "__main__":

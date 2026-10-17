@@ -338,8 +338,10 @@ class Polymarket:
             OrderArgs(price=price, size=size, side=side, token_id=token_id)
         )
 
-    def execute_market_order(self, market, amount) -> str:
-        token_id = ast.literal_eval(market[0].dict()["metadata"]["clob_token_ids"])[1]
+    def execute_market_order(self, market, amount, outcome_index: int = 1) -> str:
+        # clob_token_ids follow the order of the market's outcomes
+        token_ids = ast.literal_eval(market[0].dict()["metadata"]["clob_token_ids"])
+        token_id = token_ids[outcome_index]
         order_args = MarketOrderArgs(
             token_id=token_id,
             amount=amount,

@@ -172,9 +172,11 @@ class Prompter:
             price:'price_on_the_orderbook',
             size:'percentage_of_total_funds',
             side: BUY or SELL,
+            outcome:'name_of_the_outcome_to_trade',
         `
 
         Your trade should approximate price using the likelihood in your prediction.
+        The outcome must be exactly one of the outcomes listed above.
 
         Example response:
 
@@ -182,6 +184,7 @@ class Prompter:
             price:0.5,
             size:0.1,
             side:BUY,
+            outcome:Yes,
         ```
         
         """

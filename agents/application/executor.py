@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 from agents.polymarket.gamma import GammaMarketClient as Gamma
 from agents.connectors.chroma import PolymarketRAG as Chroma
 from agents.utils.objects import SimpleEvent, SimpleMarket
+from agents.application.automation import parse_trade
 from agents.application.prompts import Prompter
 from agents.polymarket.polymarket import Polymarket
 
@@ -182,11 +183,9 @@ class Executor:
         return content
 
     def format_trade_prompt_for_execution(self, best_trade: str) -> float:
-        data = best_trade.split(",")
-        # price = re.findall("\d+\.\d+", data[0])[0]
-        size = re.findall("\d+\.\d+", data[1])[0]
+        decision = parse_trade(best_trade)
         usdc_balance = self.polymarket.get_usdc_balance()
-        return float(size) * usdc_balance
+        return decision.size * usdc_balance
 
     def source_best_market_to_create(self, filtered_markets) -> str:
         prompt = self.prompter.create_new_market(filtered_markets)
