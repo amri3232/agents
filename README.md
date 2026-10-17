@@ -82,6 +82,15 @@ This repo is inteded for use with Python 3.9
    pip install -r requirements.txt
    ```
 
+   On Windows (PowerShell) use Python 3.9.10 or newer 3.9.x, and call the environment's Python directly, which avoids PowerShell's script policy and the wrong-Python mix-ups:
+
+   ```
+   py -3.9 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+   $env:PYTHONPATH="."
+   .\.venv\Scripts\python.exe scripts/python/cli.py run-autonomous-trader
+   ```
+
 5. Set up your environment variables:
 
    - Create a `.env` file in the project root directory
