@@ -1,0 +1,9 @@
+# Die Repo-Root-.gitignore ignoriert "site" und "dist". Hier werden beide gebraucht.
+!site
+!dist
+
+# Erzeugte Dateien
+product/build/
+site/public/
+__pycache__/
+*.pyc
